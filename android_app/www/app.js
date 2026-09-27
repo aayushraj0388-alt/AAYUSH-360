@@ -301,40 +301,102 @@ async function handleHeaderSyncClick() {
   }
 }
 
-function openAuthSheet() {
-  document.getElementById('sheet-backdrop').classList.add('open');
-  document.getElementById('sheet-auth').classList.add('open');
-}
+let html5QrScanner = null;
 
-async function handleAuthSubmit(e) {
-  e.preventDefault();
-  const email = document.getElementById('auth-email').value.trim();
-  const password = document.getElementById('auth-password').value;
-
-  if (!email || !password) return;
+async function startQrScanner() {
+  const wrapper = document.getElementById('qr-scanner-wrapper');
+  const startBtn = document.getElementById('btn-start-qr');
+  if (wrapper) wrapper.classList.remove('hidden');
+  if (startBtn) startBtn.classList.add('hidden');
 
   try {
-    setSyncStatus('Connecting...', 'amber');
-    showToast('Authenticating with Supabase...', 'info');
+    if (window.Html5Qrcode) {
+      html5QrScanner = new Html5Qrcode("qr-reader");
+      await html5QrScanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        (decodedText) => {
+          stopQrScanner();
+          applyPairingPayload(decodedText);
+        },
+        () => {}
+      );
+    } else {
+      showToast('QR scanner not ready', 'error');
+    }
+  } catch (err) {
+    console.error('[QR] Scanner start error:', err);
+    showToast(`Camera permission / scan error: ${err.message || err}`, 'error');
+    stopQrScanner();
+  }
+}
+
+async function stopQrScanner() {
+  const wrapper = document.getElementById('qr-scanner-wrapper');
+  const startBtn = document.getElementById('btn-start-qr');
+  if (wrapper) wrapper.classList.add('hidden');
+  if (startBtn) startBtn.classList.remove('hidden');
+
+  if (html5QrScanner) {
+    try {
+      await html5QrScanner.stop();
+      html5QrScanner.clear();
+    } catch (_) {}
+    html5QrScanner = null;
+  }
+}
+
+async function handlePairingCodeSubmit(e) {
+  e.preventDefault();
+  const input = document.getElementById('pairing-code-input');
+  if (!input || !input.value.trim()) {
+    showToast('Please paste the pairing string from your Windows PC', 'error');
+    return;
+  }
+  await applyPairingPayload(input.value.trim());
+}
+
+async function applyPairingPayload(payloadStr) {
+  try {
+    let payload = null;
+    try {
+      if (payloadStr.startsWith('{')) {
+        payload = JSON.parse(payloadStr);
+      } else {
+        payload = JSON.parse(atob(payloadStr));
+      }
+    } catch (_) {
+      throw new Error('Invalid pairing string. Please copy it directly from your Windows PC.');
+    }
+
+    if (!payload || !payload.access_token || !payload.refresh_token) {
+      throw new Error('Pairing string missing authentication tokens.');
+    }
+
+    setSyncStatus('Pairing...', 'amber');
+    showToast('Pairing with Windows PC account...', 'info');
     if (!supabaseClient) initSupabase();
-    
-    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+    const { data, error } = await supabaseClient.auth.setSession({
+      access_token: payload.access_token,
+      refresh_token: payload.refresh_token
+    });
     if (error) throw error;
 
     if (data && data.user) {
       currentUser = data.user;
       updateAuthUI(currentUser.email);
-      showToast(`Connected as ${currentUser.email}! Syncing PC data...`, 'success');
+      showToast(`Paired successfully as ${currentUser.email}! Syncing PC data...`, 'success');
       closeAllSheets();
-      
-      // Pull all cloud records from Supabase into local IndexedDB
+
+      // Immediately pull full cloud database
       await syncNow();
       refreshCurrentView();
     }
   } catch (err) {
-    console.error('[Auth] Login error:', err);
-    showToast(err.message || 'Authentication failed', 'error');
-    setSyncStatus('Auth Error', 'rose');
+    console.error('[Pairing] Error:', err);
+    showToast(err.message || 'Pairing failed', 'error');
+    setSyncStatus('Pairing Error', 'rose');
   }
 }
 
@@ -455,24 +517,36 @@ async function syncNow() {
     let pushedCount = 0;
     let pulledCount = 0;
 
-    // 1. PUSH LOCAL PENDING CHANGES
-    pushedCount += await pushStoreChanges('subjects', userId);
-    pushedCount += await pushStoreChanges('chapters', userId);
-    pushedCount += await pushStoreChanges('lectures', userId);
-    pushedCount += await pushStoreChanges('tests', userId);
-    pushedCount += await pushStoreChanges('weekly_targets', userId);
-    pushedCount += await pushStoreChanges('study_sessions', userId);
-    pushedCount += await pushStoreChanges('revisions', userId);
-
-    // 2. PULL CLOUD CHANGES
     const lastSyncTime = await getSetting('cloud_last_sync_time', '');
-    pulledCount += await pullStoreChanges('subjects', userId, lastSyncTime);
-    pulledCount += await pullStoreChanges('chapters', userId, lastSyncTime);
-    pulledCount += await pullStoreChanges('lectures', userId, lastSyncTime);
-    pulledCount += await pullStoreChanges('tests', userId, lastSyncTime);
-    pulledCount += await pullStoreChanges('weekly_targets', userId, lastSyncTime);
-    pulledCount += await pullStoreChanges('study_sessions', userId, lastSyncTime);
-    pulledCount += await pullStoreChanges('revisions', userId, lastSyncTime);
+
+    // On fresh sync (empty lastSyncTime), PULL FIRST so cloud data takes absolute priority
+    if (!lastSyncTime) {
+      pulledCount += await pullStoreChanges('subjects', userId, '');
+      pulledCount += await pullStoreChanges('chapters', userId, '');
+      pulledCount += await pullStoreChanges('lectures', userId, '');
+      pulledCount += await pullStoreChanges('tests', userId, '');
+      pulledCount += await pullStoreChanges('weekly_targets', userId, '');
+      pulledCount += await pullStoreChanges('study_sessions', userId, '');
+      pulledCount += await pullStoreChanges('revisions', userId, '');
+    } else {
+      // 1. PUSH LOCAL PENDING CHANGES
+      pushedCount += await pushStoreChanges('subjects', userId);
+      pushedCount += await pushStoreChanges('chapters', userId);
+      pushedCount += await pushStoreChanges('lectures', userId);
+      pushedCount += await pushStoreChanges('tests', userId);
+      pushedCount += await pushStoreChanges('weekly_targets', userId);
+      pushedCount += await pushStoreChanges('study_sessions', userId);
+      pushedCount += await pushStoreChanges('revisions', userId);
+
+      // 2. PULL CLOUD CHANGES
+      pulledCount += await pullStoreChanges('subjects', userId, lastSyncTime);
+      pulledCount += await pullStoreChanges('chapters', userId, lastSyncTime);
+      pulledCount += await pullStoreChanges('lectures', userId, lastSyncTime);
+      pulledCount += await pullStoreChanges('tests', userId, lastSyncTime);
+      pulledCount += await pullStoreChanges('weekly_targets', userId, lastSyncTime);
+      pulledCount += await pullStoreChanges('study_sessions', userId, lastSyncTime);
+      pulledCount += await pullStoreChanges('revisions', userId, lastSyncTime);
+    }
 
     const nowIso = new Date().toISOString();
     await setSetting('cloud_last_sync_time', nowIso);
@@ -1133,7 +1207,11 @@ async function renderAnalyticsView() {
 // ============================================================================
 
 function openAuthSheet() {
-  // Offline-first mode: No auth sheet needed
+  stopQrScanner();
+  const input = document.getElementById('pairing-code-input');
+  if (input) input.value = '';
+  document.getElementById('sheet-backdrop').classList.add('open');
+  document.getElementById('sheet-auth').classList.add('open');
 }
 
 async function openAddLectureModal() {
@@ -1169,6 +1247,7 @@ function openAddTestModal() {
 }
 
 function closeAllSheets() {
+  stopQrScanner();
   document.getElementById('sheet-backdrop').classList.remove('open');
   document.querySelectorAll('.bottom-sheet').forEach(s => s.classList.remove('open'));
 }

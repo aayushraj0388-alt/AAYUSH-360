@@ -404,6 +404,31 @@ class AppAPI:
         """Triggers an immediate bidirectional sync."""
         return self.cloud_sync.sync_now()
 
+    def get_mobile_pairing_payload(self) -> Dict[str, Any]:
+        """Generates a secure pairing payload for linking the Android mobile app."""
+        import base64
+        token = self.cloud_sync._get_setting('cloud_access_token')
+        rtoken = self.cloud_sync._get_setting('cloud_refresh_token')
+        uid = self.cloud_sync._get_setting('cloud_user_id')
+        email = self.cloud_sync._get_setting('cloud_user_email')
+        
+        if not token or not rtoken or not uid:
+            return {'success': False, 'error': 'Windows app is not logged into Cloud Sync yet.'}
+            
+        payload = json.dumps({
+            "access_token": token,
+            "refresh_token": rtoken,
+            "user_id": uid,
+            "email": email
+        })
+        encoded = base64.b64encode(payload.encode('utf-8')).decode('utf-8')
+        return {
+            'success': True,
+            'pairing_payload': encoded,
+            'email': email,
+            'user_id': uid
+        }
+
     def _update_streak(self):
         today = datetime.date.today().isoformat()
         conn = self.db.get_connection()

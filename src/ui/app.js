@@ -4013,9 +4013,11 @@ async function renderSettings(container) {
             <button onclick="openCloudAuthModal('signup')" class="px-4 py-2 rounded-lg bg-white hover:bg-sky-50 text-sky-700 font-bold text-xs border border-sky-300 transition flex items-center gap-1.5">
               <i data-lucide="user-plus" class="w-3.5 h-3.5"></i> Create Cloud Account
             </button>
-          ` : `
             <button onclick="handleCloudSyncNow()" class="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5">
               <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Sync Now
+            </button>
+            <button onclick="openPairMobileModal()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5">
+              <i data-lucide="smartphone" class="w-3.5 h-3.5"></i> 📱 Pair Android App
             </button>
             <button onclick="handleCloudSignOut()" class="px-4 py-2 rounded-lg bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs border border-slate-300 transition flex items-center gap-1.5">
               <i data-lucide="log-out" class="w-3.5 h-3.5"></i> Disconnect / Sign Out
@@ -4939,6 +4941,47 @@ async function handleCloudSignOut() {
         renderSettings(document.getElementById('view-content'));
       }
     }
+  }
+}
+
+async function openPairMobileModal() {
+  try {
+    const res = await callApi('get_mobile_pairing_payload');
+    if (!res || !res.success) {
+      showToast(res ? res.error : 'Failed to generate mobile pairing code', 'error');
+      return;
+    }
+
+    const codeBox = document.getElementById('pair-mobile-code-box');
+    const qrContainer = document.getElementById('pair-mobile-qrcode');
+
+    if (codeBox) codeBox.value = res.pairing_payload;
+    if (qrContainer) {
+      qrContainer.innerHTML = '';
+      if (window.QRCode) {
+        new QRCode(qrContainer, {
+          text: res.pairing_payload,
+          width: 180,
+          height: 180,
+          colorDark: "#0f172a",
+          colorLight: "#ffffff",
+          correctLevel: QRCode.CorrectLevel.M
+        });
+      }
+    }
+
+    openModal('modal-pair-mobile');
+  } catch (err) {
+    showToast(`Error: ${err}`, 'error');
+  }
+}
+
+function copyPairingCodeToClipboard() {
+  const codeBox = document.getElementById('pair-mobile-code-box');
+  if (codeBox) {
+    codeBox.select();
+    navigator.clipboard.writeText(codeBox.value);
+    showToast('Pairing code copied to clipboard!', 'success');
   }
 }
 

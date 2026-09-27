@@ -753,10 +753,54 @@
     </div>
   </div>
 
+  <!-- Modal: Pair Mobile App -->
+  <div id="modal-pair-mobile" class="modal-overlay hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+            <i data-lucide="smartphone" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-black text-slate-900">Pair Android Mobile App</h3>
+            <p class="text-[11px] text-slate-500">Scan QR code or copy code to link phone</p>
+          </div>
+        </div>
+        <button onclick="closeModal('modal-pair-mobile')" class="text-gray-400 hover:text-gray-700 text-lg">&times;</button>
+      </div>
+
+      <div class="py-4 text-center space-y-3">
+        <!-- QR Code Container -->
+        <div class="flex justify-center p-3 bg-slate-50 rounded-xl border border-slate-200 inline-block mx-auto">
+          <div id="pair-mobile-qrcode" class="w-[180px] h-[180px] flex items-center justify-center"></div>
+        </div>
+
+        <div class="text-[11px] text-slate-600 font-medium">
+          Open <b>AAYUSH 360</b> on Android &rarr; Tap <b>"Pair with PC"</b> &rarr; Scan this QR code.
+        </div>
+
+        <div>
+          <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Or Copy Pairing String</label>
+          <div class="flex gap-1.5">
+            <input type="text" id="pair-mobile-code-box" readonly class="flex-1 bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1.5 text-[11px] font-mono select-all text-slate-700">
+            <button onclick="copyPairingCodeToClipboard()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold shadow-xs">
+              Copy
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-3 border-t border-slate-100">
+        <button type="button" onclick="closeModal('modal-pair-mobile')" class="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
   <!-- Main Application Logic Script -->
+  <script src="assets/qrcode.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
