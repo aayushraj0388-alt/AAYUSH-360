@@ -4962,16 +4962,17 @@ async function openPairMobileModal() {
       if (window.QRCode) {
         new QRCode(qrContainer, {
           text: res.pairing_payload,
-          width: 180,
-          height: 180,
-          colorDark: "#0f172a",
+          width: 240,
+          height: 240,
+          colorDark: "#000000",
           colorLight: "#ffffff",
-          correctLevel: QRCode.CorrectLevel.M
+          correctLevel: QRCode.CorrectLevel.L
         });
       }
     }
 
     openModal('modal-pair-mobile');
+    if (window.lucide) lucide.createIcons();
   } catch (err) {
     showToast(`Error: ${err}`, 'error');
   }

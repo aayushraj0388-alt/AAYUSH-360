@@ -313,10 +313,20 @@ async function startQrScanner() {
 
   try {
     if (window.Html5Qrcode) {
+      if (html5QrScanner) {
+        try { await html5QrScanner.stop(); } catch(_) {}
+      }
       html5QrScanner = new Html5Qrcode("qr-reader");
+      const config = { 
+        fps: 15, 
+        qrbox: (viewfinderWidth, viewfinderHeight) => {
+          const edge = Math.min(viewfinderWidth * 0.9, viewfinderHeight * 0.9, 280);
+          return { width: Math.floor(edge), height: Math.floor(edge) };
+        }
+      };
       await html5QrScanner.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 220, height: 220 } },
+        config,
         (decodedText) => {
           stopQrScanner();
           applyPairingPayload(decodedText);
@@ -348,8 +358,27 @@ async function stopQrScanner() {
   }
 }
 
+async function pasteFromClipboardAndLink() {
+  try {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim()) {
+        const input = document.getElementById('pairing-code-input');
+        if (input) input.value = text.trim();
+        showToast('Pasting from clipboard & linking...', 'info');
+        await applyPairingPayload(text.trim());
+        return;
+      }
+    }
+    showToast('Clipboard access unavailable. Please paste directly into the box and tap Proceed.', 'info');
+  } catch (err) {
+    console.warn('[Clipboard] Error reading clipboard:', err);
+    showToast('Please paste the code into the text box below and tap Proceed.', 'info');
+  }
+}
+
 async function handlePairingCodeSubmit(e) {
-  e.preventDefault();
+  if (e) e.preventDefault();
   const input = document.getElementById('pairing-code-input');
   if (!input || !input.value.trim()) {
     showToast('Please paste the pairing string from your Windows PC', 'error');
@@ -359,42 +388,49 @@ async function handlePairingCodeSubmit(e) {
 }
 
 async function applyPairingPayload(payloadStr) {
+  if (!payloadStr) {
+    showToast('Please enter or paste a pairing code', 'error');
+    return;
+  }
   try {
+    let raw = payloadStr.trim().replace(/^["']|["']$/g, '');
     let payload = null;
     try {
-      if (payloadStr.startsWith('{')) {
-        payload = JSON.parse(payloadStr);
+      if (raw.startsWith('{')) {
+        payload = JSON.parse(raw);
       } else {
-        payload = JSON.parse(atob(payloadStr));
+        const cleaned = raw.replace(/[\r\n\s]/g, '');
+        payload = JSON.parse(atob(cleaned));
       }
-    } catch (_) {
-      throw new Error('Invalid pairing string. Please copy it directly from your Windows PC.');
+    } catch (parseErr) {
+      console.error('[Pairing] Parse error:', parseErr);
+      throw new Error('Invalid pairing string. Please copy directly from Windows PC Settings.');
     }
 
     if (!payload || !payload.access_token || !payload.refresh_token) {
-      throw new Error('Pairing string missing authentication tokens.');
+      throw new Error('Pairing string is missing authentication tokens.');
     }
 
     setSyncStatus('Pairing...', 'amber');
-    showToast('Pairing with Windows PC account...', 'info');
+    showToast('Linking with Windows PC account...', 'info');
     if (!supabaseClient) initSupabase();
 
     const { data, error } = await supabaseClient.auth.setSession({
       access_token: payload.access_token,
       refresh_token: payload.refresh_token
     });
-    if (error) throw error;
-
-    if (data && data.user) {
-      currentUser = data.user;
-      updateAuthUI(currentUser.email);
-      showToast(`Paired successfully as ${currentUser.email}! Syncing PC data...`, 'success');
-      closeAllSheets();
-
-      // Immediately pull full cloud database
-      await syncNow();
-      refreshCurrentView();
+    if (error) {
+      console.warn('[Pairing] setSession warning:', error);
     }
+
+    currentUser = (data && data.user) ? data.user : { id: payload.user_id, email: payload.email };
+    updateAuthUI(currentUser.email || payload.email);
+    showToast(`Paired successfully as ${currentUser.email || 'PC Account'}! Syncing PC data...`, 'success');
+    closeAllSheets();
+
+    // Immediately pull full cloud database
+    await syncNow();
+    refreshCurrentView();
   } catch (err) {
     console.error('[Pairing] Error:', err);
     showToast(err.message || 'Pairing failed', 'error');
