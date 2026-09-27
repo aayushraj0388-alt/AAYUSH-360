@@ -4017,13 +4017,13 @@ async function renderSettings(container) {
             <button onclick="handleCloudSyncNow()" class="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5">
               <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Sync Now
             </button>
-            <button onclick="openPairMobileModal()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5">
-              <i data-lucide="smartphone" class="w-3.5 h-3.5"></i> 📱 Pair Android App
-            </button>
             <button onclick="handleCloudSignOut()" class="px-4 py-2 rounded-lg bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs border border-slate-300 transition flex items-center gap-1.5">
               <i data-lucide="log-out" class="w-3.5 h-3.5"></i> Disconnect / Sign Out
             </button>
           `}
+          <button onclick="openPairMobileModal()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer">
+            <i data-lucide="smartphone" class="w-3.5 h-3.5"></i> 📱 Pair Android App
+          </button>
         </div>
       </div>
 
