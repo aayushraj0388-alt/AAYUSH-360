@@ -15,6 +15,7 @@ let syncInProgress = false;
 let currentView = 'dashboard';
 let currentSubjectFilter = 'all';
 let currentLectureStatusFilter = 'all';
+let activeChapterFilter = null;
 let currentPracticeTab = 'tests';
 let currentAnalyticsFilter = 'all_time';
 let chartInstance = null;
@@ -209,41 +210,25 @@ function setSetting(key, value) {
   return dbPut('app_settings', { key, value: String(value) });
 }
 
-// Seed default JEE subjects, chapters, lectures, and tests if empty
+// Seed complete JEE subjects, chapters, lectures, and tests if missing
 async function seedDefaultSubjectsIfEmpty() {
   try {
+    const lectures = await dbGetAll('lectures');
+    const chapters = await dbGetAll('chapters');
     const subjects = await dbGetAll('subjects');
-    if (subjects.length === 0) {
-      // Try to load pre-packaged seed_data.json
-      let seedLoaded = false;
-      try {
-        const response = await fetch('seed_data.json');
-        if (response.ok) {
-          const data = await response.json();
-          if (data.subjects && data.subjects.length > 0) {
-            await dbPutBatch('subjects', data.subjects);
-            if (data.chapters) await dbPutBatch('chapters', data.chapters);
-            if (data.lectures) await dbPutBatch('lectures', data.lectures);
-            if (data.tests) await dbPutBatch('tests', data.tests);
-            if (data.weekly_targets) await dbPutBatch('weekly_targets', data.weekly_targets);
-            seedLoaded = true;
-            console.log('[IndexedDB] Pre-packaged JEE syllabus successfully seeded into offline storage');
-          }
-        }
-      } catch (err) {
-        console.warn('[IndexedDB] Could not load seed_data.json, using fallback:', err);
-      }
 
-      if (!seedLoaded) {
-        const defaultSubjects = [
-          { client_id: 'sub_physics', name: 'Physics', display_name: 'Physics', color: '#ea580c', resource_name: 'Physics Galaxy', weekly_target_val: 6, target_type: 'lectures', sort_order: 1, sync_status: 'pending' },
-          { client_id: 'sub_maths', name: 'Maths', display_name: 'Maths', color: '#db2777', resource_name: 'Cengage / Mohit Tyagi', weekly_target_val: 6, target_type: 'lectures', sort_order: 2, sync_status: 'pending' },
-          { client_id: 'sub_physical_chem', name: 'Physical Chemistry', display_name: 'Physical Chem', color: '#059669', resource_name: 'Neeraj Kumar / Alk Sir', weekly_target_val: 5, target_type: 'lectures', sort_order: 3, sync_status: 'pending' },
-          { client_id: 'sub_inorganic_chem', name: 'Inorganic Chemistry', display_name: 'Inorganic Chem', color: '#0d9488', resource_name: 'VK Jaiswal / NCERT', weekly_target_val: 4, target_type: 'lectures', sort_order: 4, sync_status: 'pending' },
-          { client_id: 'sub_organic_chem', name: 'Organic Chemistry', display_name: 'Organic Chem', color: '#e11d48', resource_name: 'MS Chouhan / NS Sir', weekly_target_val: 5, target_type: 'lectures', sort_order: 5, sync_status: 'pending' }
-        ];
-        await dbPutBatch('subjects', defaultSubjects);
-      }
+    // Force seed if lectures or chapters are missing or old placeholder subjects exist
+    const needsSeed = lectures.length === 0 || chapters.length === 0 || subjects.length === 0 || subjects.some(s => s.client_id === 'sub_physics');
+
+    if (needsSeed && window.INITIAL_SEED_DATA) {
+      const data = window.INITIAL_SEED_DATA;
+      console.log('[IndexedDB] Seeding full JEE data from INITIAL_SEED_DATA...');
+      if (data.subjects && data.subjects.length > 0) await dbPutBatch('subjects', data.subjects);
+      if (data.chapters && data.chapters.length > 0) await dbPutBatch('chapters', data.chapters);
+      if (data.lectures && data.lectures.length > 0) await dbPutBatch('lectures', data.lectures);
+      if (data.tests && data.tests.length > 0) await dbPutBatch('tests', data.tests);
+      if (data.weekly_targets && data.weekly_targets.length > 0) await dbPutBatch('weekly_targets', data.weekly_targets);
+      console.log(`[IndexedDB] Seed successful! ${data.subjects.length} subjects, ${data.chapters.length} chapters, ${data.lectures.length} lectures.`);
     }
   } catch (err) {
     console.error('[IndexedDB] Seed error:', err);
@@ -556,8 +541,13 @@ function switchView(viewName, param = null) {
   if (viewName === 'dashboard') renderDashboard();
   if (viewName === 'subjects') renderSubjectsView();
   if (viewName === 'lectures') {
-    if (param === 'backlog') currentLectureStatusFilter = 'backlog';
-    renderLecturesList();
+    if (param === 'backlog') {
+      currentLectureStatusFilter = 'backlog';
+      activeChapterFilter = null;
+    } else if (typeof param === 'string') {
+      activeChapterFilter = param;
+    }
+    renderLecturesList(activeChapterFilter);
   }
   if (viewName === 'practice') renderPracticeView();
   if (viewName === 'analytics') renderAnalyticsView();
@@ -726,23 +716,40 @@ function filterSubjectChapters(subId) {
 }
 
 function filterLecturesByChapter(chId) {
-  switchView('lectures');
-  renderLecturesList(chId);
+  activeChapterFilter = chId;
+  switchView('lectures', chId);
+}
+
+function clearChapterFilter() {
+  activeChapterFilter = null;
+  const subSelect = document.getElementById('lecture-subject-filter');
+  if (subSelect) subSelect.value = 'all';
+  renderLecturesList(null);
 }
 
 // ---------------- LECTURES ----------------
 async function renderLecturesList(targetChapterId = null) {
+  const chId = targetChapterId !== null ? targetChapterId : activeChapterFilter;
   const lectures = await dbGetAll('lectures');
   const subjects = await dbGetAll('subjects');
+  const chapters = await dbGetAll('chapters');
   const searchInput = document.getElementById('lecture-search-input');
   const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
 
+  let activeChapterObj = null;
+  if (chId) {
+    activeChapterObj = chapters.find(c => c.client_id === chId);
+  }
+
   // Subject filter dropdown
   const subSelect = document.getElementById('lecture-subject-filter');
-  if (subSelect && subSelect.options.length <= 1) {
+  if (subSelect) {
     subSelect.innerHTML = `<option value="all">All Subjects</option>` + subjects.map(s => `
       <option value="${s.client_id}">${s.display_name || s.name}</option>
     `).join('');
+    if (activeChapterObj && activeChapterObj.subject_client_id) {
+      subSelect.value = activeChapterObj.subject_client_id;
+    }
   }
   const selectedSubject = subSelect ? subSelect.value : 'all';
 
@@ -750,12 +757,12 @@ async function renderLecturesList(targetChapterId = null) {
 
   const filtered = lectures.filter(l => {
     if (l.deleted_at) return false;
-    if (targetChapterId && l.chapter_client_id !== targetChapterId) return false;
-    if (selectedSubject !== 'all' && l.subject_client_id !== selectedSubject) return false;
+    if (chId && l.chapter_client_id !== chId) return false;
+    if (!chId && selectedSubject !== 'all' && l.subject_client_id !== selectedSubject) return false;
 
     if (currentLectureStatusFilter === 'completed' && !l.is_completed) return false;
     if (currentLectureStatusFilter === 'pending' && l.is_completed) return false;
-    if (currentLectureStatusFilter === 'backlog' && (l.is_completed || l.scheduled_date >= todayStr)) return false;
+    if (currentLectureStatusFilter === 'backlog' && (l.is_completed || (l.scheduled_date && l.scheduled_date >= todayStr))) return false;
 
     if (query) {
       const matchName = (l.lecture_name || '').toLowerCase().includes(query);
@@ -764,16 +771,31 @@ async function renderLecturesList(targetChapterId = null) {
     }
 
     return true;
-  }).sort((a, b) => (a.scheduled_date || '').localeCompare(b.scheduled_date || ''));
+  }).sort((a, b) => (a.lecture_no || 0) - (b.lecture_no || 0) || (a.scheduled_date || '').localeCompare(b.scheduled_date || ''));
 
   const container = document.getElementById('lectures-container');
   if (container) {
+    let headerHtml = '';
+    if (activeChapterObj) {
+      headerHtml = `
+        <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 mb-2 flex items-center justify-between">
+          <div>
+            <div class="text-[10px] font-extrabold text-indigo-500 uppercase tracking-wider">Chapter Filter</div>
+            <div class="text-xs font-black text-indigo-950">${activeChapterObj.name}</div>
+          </div>
+          <button onclick="clearChapterFilter()" class="px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-[11px] font-bold shadow-xs">
+            Show All
+          </button>
+        </div>
+      `;
+    }
+
     if (filtered.length === 0) {
-      container.innerHTML = `<div class="text-center py-10 text-slate-400 text-xs">No lectures matching filters.</div>`;
+      container.innerHTML = headerHtml + `<div class="text-center py-10 text-slate-400 text-xs">No lectures matching filters.</div>`;
     } else {
-      container.innerHTML = filtered.map(l => {
+      container.innerHTML = headerHtml + filtered.map(l => {
         const sub = subjects.find(s => s.client_id === l.subject_client_id);
-        const isBacklog = !l.is_completed && l.scheduled_date < todayStr;
+        const isBacklog = !l.is_completed && l.scheduled_date && l.scheduled_date < todayStr;
 
         return `
           <div class="touch-card p-3 flex items-center justify-between gap-2.5 ${l.is_completed ? 'bg-slate-50/70 opacity-90' : 'bg-white'}">
