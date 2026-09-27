@@ -8,6 +8,7 @@ import os
 import subprocess
 import datetime
 import calendar
+import json
 from typing import Dict, Any, List, Optional
 from src.database import DatabaseManager
 from src.extractor import extract_all_planners
