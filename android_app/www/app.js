@@ -232,10 +232,30 @@ async function seedDefaultSubjectsIfEmpty() {
     }
   } catch (err) {
     console.error('[IndexedDB] Seed error:', err);
+// ============================================================================
+// 2. SUPABASE INITIALIZATION & AUTH
+// ============================================================================
+
+function initSupabase() {
+  try {
+    if (window.supabase) {
+      supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true
+        }
+      });
+      console.log('[Supabase] Client initialized successfully');
+    } else {
+      console.warn('[Supabase] window.supabase not available');
+    }
+  } catch (err) {
+    console.error('[Supabase] Init error:', err);
   }
 }
 
 async function restoreUserSession() {
+  if (!supabaseClient) initSupabase();
   if (!supabaseClient) return null;
   try {
     const { data: { session } } = await supabaseClient.auth.getSession();
@@ -249,7 +269,7 @@ async function restoreUserSession() {
     console.error('[Supabase] Restore session error:', err);
   }
   updateAuthUI(null);
-  setSyncStatus('Offline / Not Logged In', 'slate');
+  setSyncStatus('Offline / Local', 'slate');
   return null;
 }
 
@@ -257,16 +277,33 @@ function updateAuthUI(email) {
   const emailElem = document.getElementById('sync-account-email');
   const logoutBtn = document.getElementById('btn-logout-auth');
   const manageBtn = document.getElementById('btn-manage-auth');
+  const cloudBanner = document.getElementById('dash-cloud-banner');
 
   if (email) {
     if (emailElem) emailElem.textContent = email;
     if (logoutBtn) logoutBtn.classList.remove('hidden');
     if (manageBtn) manageBtn.textContent = 'Account Info';
+    if (cloudBanner) cloudBanner.classList.add('hidden');
   } else {
-    if (emailElem) emailElem.textContent = 'Not logged in';
+    if (emailElem) emailElem.textContent = 'Not connected';
     if (logoutBtn) logoutBtn.classList.add('hidden');
-    if (manageBtn) manageBtn.textContent = 'Sign In / Register';
+    if (manageBtn) manageBtn.textContent = 'Link Account';
+    if (cloudBanner) cloudBanner.classList.remove('hidden');
   }
+}
+
+async function handleHeaderSyncClick() {
+  if (!currentUser) {
+    openAuthSheet();
+  } else {
+    showToast('Starting cloud synchronization...', 'sync');
+    await syncNow();
+  }
+}
+
+function openAuthSheet() {
+  document.getElementById('sheet-backdrop').classList.add('open');
+  document.getElementById('sheet-auth').classList.add('open');
 }
 
 async function handleAuthSubmit(e) {
@@ -277,23 +314,41 @@ async function handleAuthSubmit(e) {
   if (!email || !password) return;
 
   try {
-    setSyncStatus('Logging in...', 'amber');
+    setSyncStatus('Connecting...', 'amber');
+    showToast('Authenticating with Supabase...', 'info');
+    if (!supabaseClient) initSupabase();
+    
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
     if (error) throw error;
 
     if (data && data.user) {
       currentUser = data.user;
       updateAuthUI(currentUser.email);
-      showToast(`Logged in as ${currentUser.email}`, 'success');
+      showToast(`Connected as ${currentUser.email}! Syncing PC data...`, 'success');
       closeAllSheets();
-      // Mark existing records as pending and trigger sync
-      await markAllPending();
-      syncNow();
+      
+      // Pull all cloud records from Supabase into local IndexedDB
+      await syncNow();
+      refreshCurrentView();
     }
   } catch (err) {
     console.error('[Auth] Login error:', err);
-    showToast(err.message || 'Login failed', 'error');
-    setSyncStatus('Error: ' + err.message.slice(0, 20), 'rose');
+    showToast(err.message || 'Authentication failed', 'error');
+    setSyncStatus('Auth Error', 'rose');
+  }
+}
+
+async function signOutCloud() {
+  try {
+    if (supabaseClient) {
+      await supabaseClient.auth.signOut();
+    }
+    currentUser = null;
+    updateAuthUI(null);
+    setSyncStatus('Offline / Local', 'slate');
+    showToast('Disconnected from cloud sync. Local data preserved.', 'info');
+  } catch (err) {
+    console.error('[Auth] Logout error:', err);
   }
 }
 
@@ -456,7 +511,7 @@ async function pushStoreChanges(storeName, userId) {
   // Batch upsert in chunks of 50
   for (let i = 0; i < payload.length; i += 50) {
     const chunk = payload.slice(i, i + 50);
-    const { error } = await supabaseClient.table(storeName).upsert(chunk, { onConflict: 'user_id,client_id' });
+    const { error } = await supabaseClient.from(storeName).upsert(chunk, { onConflict: 'user_id,client_id' });
     if (error) throw error;
   }
 
@@ -468,9 +523,11 @@ async function pushStoreChanges(storeName, userId) {
 }
 
 async function pullStoreChanges(storeName, userId, lastSyncTime) {
-  let query = supabaseClient.table(storeName).select('*').eq('user_id', userId);
+  let query = supabaseClient.from(storeName).select('*').eq('user_id', userId);
   if (lastSyncTime) {
     query = query.gt('updated_at', lastSyncTime);
+  } else {
+    query = query.limit(1000);
   }
 
   const { data, error } = await query;
@@ -1225,29 +1282,40 @@ async function handleAddTestSubmit(e) {
 }
 
 // ============================================================================
-// 6. APP BOOTSTRAP (OFFLINE-FIRST DIRECT ACCESS)
+// 6. APP BOOTSTRAP (CLOUD-SYNC & OFFLINE-CAPABLE)
 // ============================================================================
 
 window.addEventListener('DOMContentLoaded', async () => {
   try {
     await initIndexedDB();
     await seedDefaultSubjectsIfEmpty();
+    initSupabase();
+    await restoreUserSession();
 
     // Render initial UI immediately
     switchView('dashboard');
 
-    // Update offline storage stats in background
-    try {
-      const subjs = await dbGetAll('subjects');
-      const chaps = await dbGetAll('chapters');
-      const lecs = await dbGetAll('lectures');
-      const elS = document.getElementById('storage-subjects-count');
-      const elC = document.getElementById('storage-chapters-count');
-      const elL = document.getElementById('storage-lectures-count');
-      if (elS) elS.textContent = subjs.length;
-      if (elC) elC.textContent = chaps.length;
-      if (elL) elL.textContent = lecs.length;
-    } catch (_) {}
+    // If session is active and device is online, run background sync immediately
+    if (navigator.onLine && currentUser) {
+      syncNow();
+    }
+
+    window.addEventListener('online', () => {
+      showToast('Back online! Syncing...', 'sync');
+      if (currentUser) syncNow();
+    });
+
+    window.addEventListener('offline', () => {
+      setSyncStatus('Offline', 'slate');
+      showToast('Working offline (Local Mode)', 'info');
+    });
+
+    // Periodic auto sync every 60 seconds
+    setInterval(() => {
+      if (navigator.onLine && currentUser && !syncInProgress) {
+        syncNow();
+      }
+    }, 60000);
 
     if (window.lucide) lucide.createIcons();
   } catch (err) {
