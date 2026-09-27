@@ -1,0 +1,49 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.bak
+
+
+# PyInstaller / Build / Dist
+build/
+dist/
+*.spec
+
+# Android Build & Embedded JDKs
+android_app/jdk*/
+android_app/node_modules/
+**/node_modules/
+**/.gradle/
+**/build/
+**/local.properties
+**/*.apk
+**/*.aab
+**/*.jks
+**/*.keystore
+
+# SQLite databases & backups
+*.db
+*.sqlite
+*.sqlite3
+backups/
+test_db/
+
+# Local Environment & Secrets
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+
+# Node / Scratch / System
+node_modules/
+scratch/
+.system_generated/
+gh_cli/
+
+# WebView2 / App data cache
+webview_cache/
+EBWebView/
+

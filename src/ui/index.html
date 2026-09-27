@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AAYUSH 360 - Personal JEE Command Center</title>
+  <link rel="stylesheet" href="assets/tailwind.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <script src="assets/lucide.min.js"></script>
+  <script src="assets/chart.umd.min.js"></script>
+</head>
+<body class="h-screen flex flex-col bg-slate-50 text-slate-800 antialiased overflow-hidden">
+
+  <!-- TOP HEADER / GREETING BAR -->
+  <header class="h-16 border-b border-gray-200 bg-white px-6 flex items-center justify-between z-20 flex-shrink-0 shadow-sm">
+    <div class="flex items-center gap-6">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-blue-600 via-indigo-600 to-pink-500 flex items-center justify-center font-black text-white text-lg tracking-wider shadow-md shadow-blue-500/20">
+          360
+        </div>
+        <div>
+          <span class="font-extrabold text-base tracking-tight bg-gradient-to-r from-blue-600 via-indigo-600 to-pink-600 bg-clip-text text-transparent">AAYUSH 360</span>
+          <span class="text-xs ml-1.5 px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200">JEE 26-27</span>
+        </div>
+      </div>
+
+      <div class="h-6 w-px bg-gray-200"></div>
+
+      <!-- Adaptive Greeting -->
+      <div class="flex items-center gap-2">
+        <span id="header-greeting" class="font-bold text-slate-800 text-sm">Welcome back, Aayush</span>
+        <span id="header-date" class="text-xs text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200 font-medium">Today</span>
+      </div>
+    </div>
+
+    <!-- Right Quick Metrics & Action Buttons -->
+    <div class="flex items-center gap-3">
+      <!-- Streak Badge -->
+      <div class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-300 text-amber-800 text-xs font-bold shadow-sm">
+        <span class="text-sm streak-flame">🔥</span>
+        <span id="streak-counter">1 Day Streak</span>
+      </div>
+
+      <!-- Upcoming Test Pill -->
+      <div id="header-test-pill" class="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-semibold cursor-pointer hover:bg-indigo-100 transition shadow-sm" onclick="navigateTo('tests')">
+        <i data-lucide="award" class="w-3.5 h-3.5 text-indigo-600"></i>
+        <span id="header-test-text">Test 01 in 14 days</span>
+      </div>
+
+      <!-- Cloud Sync Status Pill -->
+      <button id="header-cloud-sync-btn" onclick="handleHeaderSyncClick()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 hover:bg-sky-100 text-sky-800 text-xs font-semibold shadow-sm transition" title="Supabase Cloud Sync">
+        <i data-lucide="cloud" class="w-3.5 h-3.5 text-sky-600"></i>
+        <span id="header-sync-status-text">Cloud Sync</span>
+      </button>
+
+      <!-- Quick Action Buttons -->
+      <button onclick="openAddLectureModal()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition">
+        <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+        <span>Add Lecture</span>
+      </button>
+
+      <button onclick="navigateTo('pomodoro')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-300 hover:bg-amber-100 text-amber-800 text-xs font-semibold shadow-sm transition">
+        <i data-lucide="clock" class="w-3.5 h-3.5 text-amber-600"></i>
+        <span>Pomodoro</span>
+      </button>
+
+      <button onclick="openLogQuestionsModal()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-sm transition">
+        <i data-lucide="check-square" class="w-3.5 h-3.5"></i>
+        <span>Log Questions</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN APP BODY: SIDEBAR + CONTENT -->
+  <div class="flex-1 flex overflow-hidden">
+    <!-- LEFT SIDEBAR -->
+    <aside class="w-60 border-r border-gray-200 bg-white p-3 flex flex-col justify-between flex-shrink-0 select-none shadow-sm">
+      <div class="space-y-1">
+        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-3 mb-2">Core Commands</div>
+        
+        <div class="nav-item active" onclick="navigateTo('dashboard')" data-nav="dashboard">
+          <i data-lucide="layout-dashboard" class="w-4 h-4 text-blue-600"></i>
+          <span>Dashboard</span>
+        </div>
+
+        <div class="nav-item" onclick="navigateTo('today')" data-nav="today">
+          <i data-lucide="target" class="w-4 h-4 text-orange-600"></i>
+          <span>Today</span>
+          <span id="nav-today-badge" class="ml-auto px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-orange-100 text-orange-700">0</span>
+        </div>
+
+        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-3 mt-3 mb-1">JEE Subjects</div>
+
+        <div class="nav-item" onclick="navigateTo('subject_physics')" data-nav="subject_physics">
+          <i data-lucide="zap" class="w-4 h-4 text-orange-600"></i>
+          <span>Physics</span>
+        </div>
+
+        <div class="nav-item" onclick="navigateTo('subject_maths')" data-nav="subject_maths">
+          <i data-lucide="calculator" class="w-4 h-4 text-pink-600"></i>
+          <span>Maths</span>
+        </div>
+
+        <div class="nav-item" onclick="navigateTo('subject_physical_chem')" data-nav="subject_physical_chem">
+          <i data-lucide="flask-conical" class="w-4 h-4 text-emerald-600"></i>
+          <span>Physical Chemistry</span>
+        </div>
+
+        <div class="nav-item" onclick="navigateTo('subject_inorganic_chem')" data-nav="subject_inorganic_chem">
+          <i data-lucide="layers" class="w-4 h-4 text-teal-600"></i>
+          <span>Inorganic Chemistry</span>
+        </div>
+
+        <div class="nav-item" onclick="navigateTo('subject_organic_chem')" data-nav="subject_organic_chem">
+          <i data-lucide="flower-2" class="w-4 h-4 text-rose-600"></i>
+          <span>Organic Chemistry</span>
+        </div>
+
+        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-3 mt-3 mb-1">Practice & Testing</div>
+
+        <div class="nav-item" onclick="navigateTo('dpp')" data-nav="dpp">
+          <i data-lucide="file-check-2" class="w-4 h-4 text-amber-500"></i>
+          <span>DPP</span>
+        </div>
+
+        <div class="nav-item" onclick="navigateTo('tests')" data-nav="tests">
+          <i data-lucide="award" class="w-4 h-4 text-rose-600"></i>
+          <span>Tests</span>
+        </div>
+
+        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-3 mt-3 mb-1">Study Time & Insights</div>
+
+        <div class="nav-item" onclick="navigateTo('pomodoro')" data-nav="pomodoro">
+          <i data-lucide="clock" class="w-4 h-4 text-amber-500"></i>
+          <span>Pomodoro</span>
+        </div>
+
+        <div class="nav-item" onclick="navigateTo('analytics')" data-nav="analytics">
+          <i data-lucide="bar-chart-3" class="w-4 h-4 text-emerald-600"></i>
+          <span>Analytics</span>
+        </div>
+
+        <div class="nav-item" onclick="navigateTo('settings')" data-nav="settings">
+          <i data-lucide="settings" class="w-4 h-4 text-slate-500"></i>
+          <span>Settings</span>
+        </div>
+      </div>
+
+      <!-- Quick Backlog Indicator in Footer of Sidebar -->
+      <div id="sidebar-backlog-card" class="p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs cursor-pointer hover:bg-red-100 transition shadow-sm" onclick="triggerSmartRedistribute()">
+        <div class="flex items-center justify-between text-red-700 font-semibold mb-1">
+          <span class="flex items-center gap-1.5"><i data-lucide="alert-circle" class="w-3.5 h-3.5 text-red-600"></i> Backlog</span>
+          <span id="sidebar-backlog-count" class="px-1.5 py-0.5 rounded bg-red-200 text-red-800 text-[10px] font-bold">0</span>
+        </div>
+        <p class="text-[10px] text-gray-500">Click to run smart redistribution.</p>
+      </div>
+    </aside>
+
+    <!-- MAIN VIEWPORT -->
+    <main id="app-viewport" class="flex-1 overflow-y-auto p-6 bg-slate-50 relative min-w-0">
+      <div id="view-content" class="max-w-7xl mx-auto space-y-6 min-w-0 w-full">
+        <!-- Rendered via app.js -->
+      </div>
+    </main>
+  </div>
+
+  <!-- ==================== GLOBAL MODALS ==================== -->
+
+  <!-- 1. ADD LECTURE MODAL -->
+  <div id="modal-add-lecture" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="modern-card w-full max-w-xl p-6 bg-white border border-gray-200 shadow-2xl relative rounded-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4 pb-3 border-b border-gray-100">
+        <h3 class="text-base font-bold text-gray-900 flex items-center gap-2">
+          <i data-lucide="plus-circle" class="w-5 h-5 text-blue-600"></i> Add New Lecture
+        </h3>
+        <button onclick="closeModal('modal-add-lecture')" class="text-gray-400 hover:text-gray-700 text-lg">&times;</button>
+      </div>
+
+      <form id="form-add-lecture" onsubmit="handleAddLectureSubmit(event)" class="space-y-4 text-xs">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Subject</label>
+            <select id="add-lec-subject" onchange="populateAddLectureChapters()" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+              <option value="1">Physics</option>
+              <option value="2">Mathematics</option>
+              <option value="3">Physical Chemistry</option>
+              <option value="4">Inorganic Chemistry</option>
+              <option value="5">Organic Chemistry</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Chapter</label>
+            <select id="add-lec-chapter" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Lecture Number</label>
+            <input type="number" id="add-lec-no" required min="1" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. 42">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">DPP Number</label>
+            <input type="number" id="add-lec-dpp" min="1" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. 42">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Scheduled Date</label>
+            <input type="date" id="add-lec-date" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-gray-700 font-semibold mb-1">Lecture Name</label>
+          <input type="text" id="add-lec-name" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. Rotational Motion - Lec 42: Torque and Angular Momentum">
+        </div>
+
+        <!-- Collapsible Optional Details -->
+        <details class="group border border-slate-200 rounded-xl p-3 bg-slate-50 transition">
+          <summary class="text-xs font-bold text-slate-600 cursor-pointer flex items-center justify-between select-none hover:text-slate-900">
+            <span>More details (Optional: Topic, Resource, Batch, Auto-shift)</span>
+            <span class="text-slate-400 group-open:rotate-180 transition-transform">▼</span>
+          </summary>
+          <div class="space-y-3 pt-3 mt-2 border-t border-slate-200">
+            <div>
+              <label class="block text-gray-700 font-semibold mb-1">Topic</label>
+              <input type="text" id="add-lec-topic" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. Angular momentum conservation & problems">
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-gray-700 font-semibold mb-1">Resource</label>
+                <input type="text" id="add-lec-resource" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. PW 1.0">
+              </div>
+              <div>
+                <label class="block text-gray-700 font-semibold mb-1">Batch</label>
+                <input type="text" id="add-lec-batch" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. Prayas JEE 2027">
+              </div>
+            </div>
+
+            <!-- Smart Renumbering Option -->
+            <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
+              <input type="checkbox" id="add-lec-renumber" class="mt-0.5 custom-checkbox">
+              <div>
+                <label for="add-lec-renumber" class="font-semibold text-blue-900 cursor-pointer text-xs">Auto-shift subsequent lectures in this chapter</label>
+                <p class="text-[10px] text-gray-600">If inserting lecture #42 between #41 and #42, existing lectures ≥ 42 will automatically be shifted to 43, 44, etc.</p>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <div class="flex justify-end gap-3 pt-3 border-t border-gray-100">
+          <button type="button" onclick="closeModal('modal-add-lecture')" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold border border-gray-200">Cancel</button>
+          <button type="submit" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-sm">Add Lecture</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 1B. ADD DPP MODAL -->
+  <div id="modal-add-dpp" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="modern-card w-full max-w-md p-6 bg-white border border-amber-200 shadow-2xl relative rounded-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4 pb-3 border-b border-gray-100">
+        <div>
+          <h3 class="text-base font-bold text-gray-900 flex items-center gap-2">
+            <i data-lucide="plus-circle" class="w-5 h-5 text-amber-600"></i> Add DPP
+          </h3>
+          <span id="add-dpp-subtitle" class="text-xs text-gray-500 font-medium">Inside Chapter</span>
+        </div>
+        <button onclick="closeModal('modal-add-dpp')" class="text-gray-400 hover:text-gray-700 text-lg">&times;</button>
+      </div>
+
+      <form id="form-add-dpp" onsubmit="handleAddDppSubmit(event)" class="space-y-4 text-xs">
+        <input type="hidden" id="add-dpp-subj-id">
+        <input type="hidden" id="add-dpp-chap-id">
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">DPP Number</label>
+            <input type="number" id="add-dpp-no" required min="1" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 focus:border-amber-500 focus:ring-1 focus:ring-amber-500" placeholder="e.g. 13">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Date</label>
+            <input type="date" id="add-dpp-date" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 focus:border-amber-500 focus:ring-1 focus:ring-amber-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-gray-700 font-semibold mb-1">DPP Title</label>
+          <input type="text" id="add-dpp-title" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 focus:border-amber-500 focus:ring-1 focus:ring-amber-500" placeholder="e.g. DPP 13: Practice Questions">
+        </div>
+
+        <div>
+          <label class="block text-gray-700 font-semibold mb-1">Notes (Optional)</label>
+          <textarea id="add-dpp-notes" rows="2" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 resize-y focus:border-amber-500 focus:ring-1 focus:ring-amber-500" placeholder="Important formulas, questions to focus on..."></textarea>
+        </div>
+
+        <div class="flex justify-end gap-3 pt-3 border-t border-gray-100">
+          <button type="button" onclick="closeModal('modal-add-dpp')" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold border border-gray-200">Cancel</button>
+          <button type="submit" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold shadow-sm">Save DPP</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2. EDIT LECTURE MODAL / DRAWER -->
+  <div id="modal-edit-lecture" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="modern-card w-full max-w-2xl p-6 bg-white border border-gray-200 shadow-2xl relative rounded-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4 pb-3 border-b border-gray-100">
+        <div>
+          <h3 class="text-base font-bold text-gray-900 flex items-center gap-2">
+            <i data-lucide="edit-3" class="w-5 h-5 text-indigo-600"></i> Edit Lecture Details
+          </h3>
+          <span id="edit-lec-subtitle" class="text-xs text-gray-500 font-medium">Lecture Details</span>
+        </div>
+        <button onclick="closeModal('modal-edit-lecture')" class="text-gray-400 hover:text-gray-700 text-lg">&times;</button>
+      </div>
+
+      <form id="form-edit-lecture" onsubmit="handleEditLectureSubmit(event)" class="space-y-4 text-xs">
+        <input type="hidden" id="edit-lec-id">
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Subject</label>
+            <select id="edit-lec-subject" onchange="populateEditLectureChapters()" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 focus:border-blue-500">
+              <option value="1">Physics</option>
+              <option value="2">Mathematics</option>
+              <option value="3">Physical Chemistry</option>
+              <option value="4">Inorganic Chemistry</option>
+              <option value="5">Organic Chemistry</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Chapter</label>
+            <select id="edit-lec-chapter" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 focus:border-blue-500">
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Lecture Number</label>
+            <input type="number" id="edit-lec-no" required min="1" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">DPP Number</label>
+            <input type="number" id="edit-lec-dpp" min="1" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Scheduled Date</label>
+            <input type="date" id="edit-lec-date" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-gray-700 font-semibold mb-1">Lecture Name / DPP Title</label>
+          <textarea id="edit-lec-name" rows="2" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 resize-y break-words" placeholder="Full lecture or DPP title..."></textarea>
+        </div>
+
+        <div>
+          <label class="block text-gray-700 font-semibold mb-1">Topic</label>
+          <input type="text" id="edit-lec-topic" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Resource</label>
+            <input type="text" id="edit-lec-resource" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Batch / Faculty</label>
+            <input type="text" id="edit-lec-batch" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900">
+          </div>
+        </div>
+
+        <!-- Separate Completion States -->
+        <div class="grid grid-cols-2 gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <div class="flex items-center gap-2">
+            <input type="checkbox" id="edit-lec-completed" class="custom-checkbox">
+            <div>
+              <label for="edit-lec-completed" class="font-semibold text-gray-800 cursor-pointer">Lecture Completed</label>
+              <div id="edit-lec-completed-date" class="text-[10px] text-gray-500">Status: Pending</div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <input type="checkbox" id="edit-lec-dpp-completed" class="custom-checkbox dpp-checkbox">
+            <div>
+              <label for="edit-lec-dpp-completed" class="font-semibold text-gray-800 cursor-pointer">DPP Completed</label>
+              <div id="edit-lec-dpp-date" class="text-[10px] text-gray-500">Separate State</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Question Practice & Accuracy -->
+        <div class="grid grid-cols-3 gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Questions Practiced</label>
+            <input type="number" id="edit-lec-q-prac" min="0" class="w-full bg-white border border-gray-300 rounded p-1.5 text-gray-900">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Correct Questions</label>
+            <input type="number" id="edit-lec-q-corr" min="0" class="w-full bg-white border border-gray-300 rounded p-1.5 text-gray-900">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Incorrect Questions</label>
+            <input type="number" id="edit-lec-q-inc" min="0" class="w-full bg-white border border-gray-300 rounded p-1.5 text-gray-900">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-gray-700 font-semibold mb-1">Personal Notes</label>
+          <textarea id="edit-lec-notes" rows="2" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 resize-y" placeholder="Important formulas, doubts, tricks..."></textarea>
+        </div>
+
+        <div class="flex items-center justify-between pt-3 border-t border-gray-100">
+          <div class="flex gap-2">
+            <button type="button" onclick="handleDuplicateCurrentLecture()" class="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-indigo-700 font-semibold border border-gray-200">Duplicate</button>
+            <button type="button" onclick="handleDeleteCurrentLecture()" class="px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-semibold">Delete</button>
+          </div>
+          <div class="flex gap-2">
+            <button type="button" onclick="closeModal('modal-edit-lecture')" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold border border-gray-200">Cancel</button>
+            <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow-sm">Save Changes</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2B. COMPACT DPP MANAGEMENT MODAL (DIRECT FROM LECTURE CARD) -->
+  <div id="modal-edit-dpp" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="modern-card w-full max-w-md p-6 bg-white border border-amber-200 shadow-2xl relative rounded-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4 pb-3 border-b border-gray-100">
+        <div>
+          <h3 id="edit-dpp-modal-heading" class="text-base font-extrabold text-gray-900 flex items-center gap-2">
+            <i data-lucide="clipboard-check" class="w-5 h-5 text-amber-600"></i> Manage DPP
+          </h3>
+          <span id="edit-dpp-subtitle" class="text-xs text-gray-500 font-medium">Lecture Reference</span>
+        </div>
+        <button onclick="closeModal('modal-edit-dpp')" class="text-gray-400 hover:text-gray-700 text-lg">&times;</button>
+      </div>
+
+      <form id="form-edit-dpp" onsubmit="handleEditDppSubmit(event)" class="space-y-4 text-xs">
+        <input type="hidden" id="edit-dpp-lecture-id">
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-gray-700 font-bold mb-1">DPP Number</label>
+            <input type="number" id="edit-dpp-no" required min="1" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-gray-900 font-bold focus:border-amber-500 focus:bg-white" placeholder="e.g. 27">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-bold mb-1">Target Date</label>
+            <input type="date" id="edit-dpp-date" required class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-gray-900 focus:border-amber-500 focus:bg-white">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-gray-700 font-bold mb-1">DPP Title / Topic Notes</label>
+          <input type="text" id="edit-dpp-topic" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-gray-900 focus:border-amber-500 focus:bg-white break-words" placeholder="e.g. Torque & Moment of Inertia Questions">
+        </div>
+
+        <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2.5">
+          <input type="checkbox" id="edit-dpp-completed" class="custom-checkbox dpp-checkbox">
+          <div>
+            <label for="edit-dpp-completed" class="font-bold text-amber-900 cursor-pointer text-xs">Mark DPP as Completed</label>
+            <div class="text-[10px] text-amber-700 font-medium">DPP status is tracked independently from lecture completion.</div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-gray-700 font-bold mb-1">Notes / Doubts</label>
+          <textarea id="edit-dpp-notes" rows="2" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-gray-900 resize-y break-words focus:border-amber-500 focus:bg-white" placeholder="Questions to re-attempt, key formulas..."></textarea>
+        </div>
+
+        <div class="flex justify-end gap-3 pt-3 border-t border-gray-100">
+          <button type="button" onclick="closeModal('modal-edit-dpp')" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold border border-gray-200">Cancel</button>
+          <button type="submit" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold shadow-sm">Save DPP</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3. BULK EDIT MODAL -->
+  <div id="modal-bulk-edit" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="modern-card w-full max-w-lg p-6 bg-white border border-gray-200 shadow-2xl relative rounded-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4 pb-3 border-b border-gray-100">
+        <h3 class="text-base font-bold text-gray-900 flex items-center gap-2">
+          <i data-lucide="layers" class="w-5 h-5 text-amber-500"></i> Bulk Edit (<span id="bulk-selected-count">0</span> Selected)
+        </h3>
+        <button onclick="closeModal('modal-bulk-edit')" class="text-gray-400 hover:text-gray-700 text-lg">&times;</button>
+      </div>
+
+      <form id="form-bulk-edit" onsubmit="handleBulkEditSubmit(event)" class="space-y-4 text-xs">
+        <div>
+          <label class="block text-gray-700 font-semibold mb-1">Choose Bulk Operation</label>
+          <select id="bulk-operation" onchange="handleBulkOperationChange()" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 focus:border-blue-500">
+            <option value="shift_dates">Shift Scheduled Dates by N Days (+/-)</option>
+            <option value="set_date">Set Specific Date for All</option>
+            <option value="change_chapter">Move to Chapter</option>
+            <option value="change_resource">Change Resource</option>
+            <option value="renumber_sequentially">Renumber Sequentially Starting From N</option>
+            <option value="mark_lectures_complete">Mark Lectures as Completed</option>
+            <option value="mark_dpps_complete">Mark DPPs as Completed</option>
+            <option value="delete_selected">Delete Selected Lectures (Destructive)</option>
+          </select>
+        </div>
+
+        <div id="bulk-param-container" class="p-3 bg-gray-50 rounded-lg border border-gray-200">
+        </div>
+
+        <div class="flex justify-end gap-3 pt-3 border-t border-gray-100">
+          <button type="button" onclick="closeModal('modal-bulk-edit')" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold border border-gray-200">Cancel</button>
+          <button type="submit" class="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold shadow-sm">Apply Bulk Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 4. LOG QUESTIONS MODAL -->
+  <div id="modal-log-questions" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="modern-card w-full max-w-md p-6 bg-white border border-gray-200 shadow-2xl relative rounded-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4 pb-3 border-b border-gray-100">
+        <h3 class="text-base font-bold text-gray-900 flex items-center gap-2">
+          <i data-lucide="check-square" class="w-5 h-5 text-emerald-600"></i> Log Question Practice
+        </h3>
+        <button onclick="closeModal('modal-log-questions')" class="text-gray-400 hover:text-gray-700 text-lg">&times;</button>
+      </div>
+
+      <form id="form-log-questions" onsubmit="handleLogQuestionsSubmit(event)" class="space-y-4 text-xs">
+        <div>
+          <label class="block text-gray-700 font-semibold mb-1">Subject</label>
+          <select id="log-q-subject" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 focus:border-blue-500">
+            <option value="1">Physics</option>
+            <option value="2">Mathematics</option>
+            <option value="3">Physical Chemistry</option>
+            <option value="4">Inorganic Chemistry</option>
+            <option value="5">Organic Chemistry</option>
+          </select>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Practiced</label>
+            <input type="number" id="log-q-total" min="1" required class="w-full bg-white border border-gray-300 rounded p-2 text-gray-900" placeholder="e.g. 25" oninput="calcAccuracyPreview()">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Correct</label>
+            <input type="number" id="log-q-corr" min="0" required class="w-full bg-white border border-gray-300 rounded p-2 text-gray-900" placeholder="e.g. 21" oninput="calcAccuracyPreview()">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Incorrect</label>
+            <input type="number" id="log-q-inc" min="0" class="w-full bg-white border border-gray-300 rounded p-2 text-gray-900" placeholder="e.g. 4">
+          </div>
+        </div>
+
+        <div class="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg flex justify-between items-center text-emerald-800">
+          <span class="font-semibold">Accuracy Preview:</span>
+          <span id="log-q-accuracy-badge" class="font-bold text-sm">--%</span>
+        </div>
+
+        <div>
+          <label class="block text-gray-700 font-semibold mb-1">Date</label>
+          <input type="date" id="log-q-date" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900">
+        </div>
+
+        <div>
+          <label class="block text-gray-700 font-semibold mb-1">Topic / Notes</label>
+          <input type="text" id="log-q-notes" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. PYQs 2024-2025 on Electrostatics">
+        </div>
+
+        <div class="flex justify-end gap-3 pt-3 border-t border-gray-100">
+          <button type="button" onclick="closeModal('modal-log-questions')" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold border border-gray-200">Cancel</button>
+          <button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm">Log Questions</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 5. TEST DETAILS & SCORE MODAL -->
+  <div id="modal-test-score" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="modern-card w-full max-w-xl p-6 bg-white border border-gray-200 shadow-2xl relative rounded-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4 pb-3 border-b border-gray-100">
+        <div>
+          <h3 id="test-modal-title" class="text-base font-bold text-gray-900 flex items-center gap-2">
+            <i data-lucide="award" class="w-5 h-5 text-purple-600"></i> Test Details & Score
+          </h3>
+          <span id="test-modal-date" class="text-xs text-gray-500">Date: --</span>
+        </div>
+        <button onclick="closeModal('modal-test-score')" class="text-gray-400 hover:text-gray-700 text-lg">&times;</button>
+      </div>
+
+      <div class="space-y-2 mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs">
+        <div class="font-bold text-gray-700 uppercase tracking-wider text-[11px] mb-1">Official Test Syllabus</div>
+        <div class="space-y-1.5">
+          <div class="break-words"><span class="text-blue-600 font-semibold">Physics:</span> <span id="test-syllabus-phys" class="text-gray-700"></span></div>
+          <div class="break-words"><span class="text-amber-600 font-semibold">Chemistry:</span> <span id="test-syllabus-chem" class="text-gray-700"></span></div>
+          <div class="break-words"><span class="text-emerald-600 font-semibold">Maths:</span> <span id="test-syllabus-math" class="text-gray-700"></span></div>
+        </div>
+      </div>
+
+      <form id="form-test-score" onsubmit="handleTestScoreSubmit(event)" class="space-y-4 text-xs">
+        <input type="hidden" id="test-modal-id">
+
+        <div class="grid grid-cols-4 gap-3">
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Test #</label>
+            <input type="number" id="test-modal-no" min="1" max="99" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900">
+          </div>
+          <div class="col-span-3">
+            <label class="block text-gray-700 font-semibold mb-1">Test Name</label>
+            <input type="text" id="test-modal-name" required class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Status</label>
+            <select id="test-status" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900">
+              <option value="upcoming">Upcoming</option>
+              <option value="completed">Completed</option>
+              <option value="missed">Missed</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Time Taken (Minutes)</label>
+            <input type="number" id="test-time-taken" min="0" max="300" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. 180">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Score Obtained</label>
+            <input type="number" step="1" id="test-score" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. 215">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Total Marks</label>
+            <input type="number" id="test-total-marks" value="300" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Correct Questions</label>
+            <input type="number" id="test-correct" min="0" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. 56">
+          </div>
+          <div>
+            <label class="block text-gray-700 font-semibold mb-1">Incorrect Questions</label>
+            <input type="number" id="test-incorrect" min="0" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900" placeholder="e.g. 9">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-gray-700 font-semibold mb-1">Performance Analysis / Post-Test Notes</label>
+          <textarea id="test-notes" rows="3" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-900 resize-y" placeholder="Mistakes made, weak areas to revise, speed issues..."></textarea>
+        </div>
+
+        <div class="flex justify-end gap-3 pt-3 border-t border-gray-100">
+          <button type="button" onclick="closeModal('modal-test-score')" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold border border-gray-200">Cancel</button>
+          <button type="submit" class="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-semibold shadow-sm">Save Test Result</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 6. WEEKLY TARGETS MODAL -->
+  <div id="modal-weekly-targets" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="modern-card w-full max-w-lg p-6 bg-white border border-indigo-200 shadow-2xl relative rounded-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-3 pb-3 border-b border-gray-100">
+        <div>
+          <h3 class="text-base font-black text-gray-900 flex items-center gap-2">
+            <i data-lucide="target" class="w-5 h-5 text-indigo-600"></i> Weekly Target Manager
+          </h3>
+          <p class="text-[11px] text-gray-500">Customize targets for this specific week. Historical and future weeks remain independently preserved.</p>
+        </div>
+        <button onclick="closeModal('modal-weekly-targets')" class="text-gray-400 hover:text-gray-700 text-lg">&times;</button>
+      </div>
+
+      <!-- Week Selector Navigation -->
+      <div class="flex items-center justify-between p-2.5 bg-slate-100 rounded-xl border border-slate-200 mb-4 text-xs">
+        <button type="button" onclick="changeWeeklyTargetsModalWeek(-1)" class="px-2.5 py-1 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold shadow-xs">&larr; Prev Week</button>
+        <div class="text-center">
+          <div id="wt-modal-week-label" class="font-bold text-gray-900 text-xs">Week of ...</div>
+          <div id="wt-modal-week-range" class="text-[10px] text-indigo-700 font-medium">...</div>
+        </div>
+        <button type="button" onclick="changeWeeklyTargetsModalWeek(1)" class="px-2.5 py-1 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold shadow-xs">Next Week &rarr;</button>
+      </div>
+
+      <!-- Subject Target Rows Form -->
+      <form id="form-weekly-targets" onsubmit="handleWeeklyTargetsSubmit(event)" class="space-y-3.5 text-xs">
+        <input type="hidden" id="wt-modal-week-start" value="">
+
+        <div id="wt-modal-subjects-container" class="space-y-2.5">
+          <!-- Dynamic subject rows generated via JS -->
+        </div>
+
+        <div class="p-2.5 bg-indigo-50 border border-indigo-200 rounded-lg text-[11px] text-indigo-900 flex items-start gap-2">
+          <i data-lucide="info" class="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5"></i>
+          <div>
+            <b>Historical Preservation:</b> Changes made here apply only to the selected week. Previous weeks keep their logged target values for historical analytics accuracy.
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-3 pt-3 border-t border-gray-100">
+          <button type="button" onclick="closeModal('modal-weekly-targets')" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold border border-gray-200">Cancel</button>
+          <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-sm">Save Weekly Targets</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 7. SUPABASE CLOUD AUTH MODAL -->
+  <div id="modal-cloud-auth" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="modern-card w-full max-w-md p-6 bg-white border border-sky-200 shadow-2xl relative rounded-2xl">
+      <div class="flex justify-between items-center mb-3 pb-3 border-b border-gray-100">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-sky-500 text-white flex items-center justify-center font-bold">
+            <i data-lucide="cloud" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 id="cloud-auth-title" class="text-sm font-black text-gray-900">Supabase Cloud Sync</h3>
+            <p class="text-[11px] text-gray-500">Local-first sync for Windows & future Android</p>
+          </div>
+        </div>
+        <button onclick="closeModal('modal-cloud-auth')" class="text-gray-400 hover:text-gray-700 text-lg">&times;</button>
+      </div>
+
+      <div class="flex gap-2 p-1 bg-slate-100 rounded-lg mb-4 text-xs font-semibold">
+        <button type="button" id="tab-cloud-signin" onclick="switchCloudAuthTab('signin')" class="flex-1 py-1.5 rounded-md bg-white text-slate-800 shadow-xs text-center transition">Sign In</button>
+        <button type="button" id="tab-cloud-signup" onclick="switchCloudAuthTab('signup')" class="flex-1 py-1.5 rounded-md text-slate-500 hover:text-slate-800 text-center transition">Create Account</button>
+      </div>
+
+      <form id="form-cloud-auth" onsubmit="handleCloudAuthSubmit(event)" class="space-y-3 text-xs">
+        <div>
+          <label class="block font-bold text-gray-700 mb-1">Email Address</label>
+          <input type="email" id="cloud-auth-email" required placeholder="your.email@example.com" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 font-medium">
+        </div>
+
+        <div>
+          <label class="block font-bold text-gray-700 mb-1">Password</label>
+          <input type="password" id="cloud-auth-password" required minlength="6" placeholder="••••••••" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 font-medium">
+        </div>
+
+        <div class="p-2.5 bg-sky-50 border border-sky-200 rounded-lg text-[11px] text-sky-900">
+          <i data-lucide="shield-check" class="w-3.5 h-3.5 text-sky-600 inline mr-1"></i>
+          <b>100% Local-First:</b> AAYUSH 360 always works offline. Signing in syncs your progress securely across your devices.
+        </div>
+
+        <div class="flex justify-end gap-2 pt-3 border-t border-gray-100">
+          <button type="button" onclick="closeModal('modal-cloud-auth')" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold border border-gray-200">Cancel</button>
+          <button type="submit" id="cloud-auth-submit-btn" class="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold shadow-sm">Sign In</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- Main Application Logic Script -->
+  <script src="app.js"></script>
+</body>
+</html>

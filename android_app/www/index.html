@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>AAYUSH 360 - JEE Mobile</title>
+  <link rel="stylesheet" href="assets/tailwind.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <script src="assets/lucide.min.js"></script>
+  <script src="assets/chart.umd.min.js"></script>
+  <script src="assets/supabase.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 flex flex-col min-h-screen">
+
+  <!-- TOAST NOTIFICATIONS -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- STICKY TOP HEADER -->
+  <header class="app-header flex items-center justify-between shadow-sm">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 via-blue-600 to-pink-500 flex items-center justify-center font-black text-white text-sm shadow-md shadow-indigo-500/20">
+        360
+      </div>
+      <div>
+        <div class="font-extrabold text-sm tracking-tight bg-gradient-to-r from-indigo-600 via-blue-600 to-pink-600 bg-clip-text text-transparent leading-none">AAYUSH 360</div>
+        <div class="text-[10px] text-slate-500 font-semibold mt-0.5">JEE Command Center</div>
+      </div>
+    </div>
+
+    <!-- Header Actions -->
+    <div class="flex items-center gap-2">
+      <!-- Streak Pill -->
+      <div class="flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-bold shadow-xs">
+        <span class="text-xs">🔥</span>
+        <span id="header-streak-text">1d Streak</span>
+      </div>
+
+      <!-- Cloud Sync Status Pill -->
+      <button id="header-sync-btn" onclick="openAuthSheet()" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-sky-50 border border-sky-200 text-sky-800 text-[11px] font-semibold transition active:scale-95">
+        <span id="sync-dot" class="w-2 h-2 rounded-full bg-emerald-500"></span>
+        <span id="header-sync-text">Synced</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN SCROLLABLE CONTENT -->
+  <main class="main-content flex-1 px-4 py-3 space-y-4">
+
+    <!-- ==================== VIEW 1: DASHBOARD ==================== -->
+    <section id="view-dashboard" class="space-y-4">
+      <!-- Greeting Banner -->
+      <div class="touch-card bg-gradient-to-br from-indigo-600 to-blue-700 text-white p-5 rounded-2xl shadow-lg shadow-indigo-600/15">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-xs font-medium text-indigo-100 uppercase tracking-wider">JEE 2026-2027</div>
+            <h1 class="text-xl font-black mt-0.5" id="dash-greeting">Welcome, Aayush!</h1>
+          </div>
+          <div class="text-right">
+            <span id="dash-date-pill" class="text-[11px] bg-white/20 backdrop-blur-md px-2.5 py-1 rounded-lg font-bold">Today</span>
+          </div>
+        </div>
+
+        <!-- Macro Stats Row -->
+        <div class="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-white/20 text-center">
+          <div class="bg-white/10 rounded-xl p-2">
+            <div class="text-lg font-black" id="dash-lectures-completed">0/0</div>
+            <div class="text-[10px] text-indigo-100 font-medium">Lectures Done</div>
+          </div>
+          <div class="bg-white/10 rounded-xl p-2">
+            <div class="text-lg font-black" id="dash-overall-progress">0%</div>
+            <div class="text-[10px] text-indigo-100 font-medium">Syllabus</div>
+          </div>
+          <div class="bg-white/10 rounded-xl p-2">
+            <div class="text-lg font-black" id="dash-tests-done">0</div>
+            <div class="text-[10px] text-indigo-100 font-medium">Tests Given</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Action Floating Bar -->
+      <div class="grid grid-cols-3 gap-2">
+        <button onclick="openAddLectureModal()" class="touch-card flex items-center justify-center gap-1.5 py-2.5 bg-indigo-50 border-indigo-200 text-indigo-700 font-bold text-xs">
+          <i data-lucide="plus-circle" class="w-4 h-4"></i>
+          <span>Add Lecture</span>
+        </button>
+        <button onclick="openLogQuestionsModal()" class="touch-card flex items-center justify-center gap-1.5 py-2.5 bg-emerald-50 border-emerald-200 text-emerald-700 font-bold text-xs">
+          <i data-lucide="check-square" class="w-4 h-4"></i>
+          <span>Log DPP</span>
+        </button>
+        <button onclick="openAddTestModal()" class="touch-card flex items-center justify-center gap-1.5 py-2.5 bg-amber-50 border-amber-200 text-amber-700 font-bold text-xs">
+          <i data-lucide="award" class="w-4 h-4"></i>
+          <span>Log Test</span>
+        </button>
+      </div>
+
+      <!-- Backlog Banner (Conditional) -->
+      <div id="dash-backlog-card" class="touch-card bg-rose-50 border-rose-200 p-3 flex items-center justify-between hidden">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center">
+            <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <div class="text-xs font-bold text-rose-800" id="dash-backlog-title">0 Backlog Lectures</div>
+            <div class="text-[10px] text-rose-600">Pending past scheduled date</div>
+          </div>
+        </div>
+        <button onclick="switchView('lectures', 'backlog')" class="px-2.5 py-1 rounded-lg bg-rose-600 text-white text-xs font-bold shadow-xs">View</button>
+      </div>
+
+      <!-- Today's Schedule & Targets -->
+      <div class="touch-card space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <i data-lucide="calendar-check" class="w-4 h-4 text-indigo-600"></i>
+            <h2 class="font-extrabold text-sm text-slate-800">Today's Target Schedule</h2>
+          </div>
+          <span id="dash-today-count" class="pill bg-indigo-50 text-indigo-700 border border-indigo-200">0 Tasks</span>
+        </div>
+
+        <div id="dash-today-list" class="space-y-2">
+          <div class="text-center py-6 text-slate-400 text-xs">Loading today's schedule...</div>
+        </div>
+      </div>
+
+      <!-- Subject Progress Overview -->
+      <div class="touch-card space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <i data-lucide="bar-chart-2" class="w-4 h-4 text-indigo-600"></i>
+            <h2 class="font-extrabold text-sm text-slate-800">Subject Breakdown</h2>
+          </div>
+          <button onclick="switchView('subjects')" class="text-xs text-indigo-600 font-bold">See All</button>
+        </div>
+
+        <div id="dash-subject-progress-list" class="space-y-2.5">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== VIEW 2: SUBJECTS & CHAPTERS ==================== -->
+    <section id="view-subjects" class="space-y-3 hidden">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-lg font-black text-slate-800">Subjects & Chapters</h1>
+          <p class="text-xs text-slate-500">Tap a chapter to inspect lectures</p>
+        </div>
+      </div>
+
+      <!-- Subject Filter Pills -->
+      <div id="subject-tabs-container" class="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+        <!-- Populated dynamically -->
+      </div>
+
+      <!-- Chapter List -->
+      <div id="chapters-list-container" class="space-y-2.5">
+        <!-- Populated dynamically -->
+      </div>
+    </section>
+
+    <!-- ==================== VIEW 3: LECTURES ==================== -->
+    <section id="view-lectures" class="space-y-3 hidden">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-lg font-black text-slate-800">Lecture Checklist</h1>
+          <p class="text-xs text-slate-500">Track lectures, DPPs & questions</p>
+        </div>
+        <button onclick="openAddLectureModal()" class="pill bg-indigo-600 text-white font-bold px-3 py-1.5 shadow-sm">
+          <i data-lucide="plus" class="w-3.5 h-3.5 mr-1"></i> Add
+        </button>
+      </div>
+
+      <!-- Lecture Filter Row -->
+      <div class="space-y-2">
+        <div class="flex gap-1.5">
+          <input type="text" id="lecture-search-input" placeholder="Search lectures, topics..." oninput="renderLecturesList()" class="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-indigo-500 shadow-xs">
+          <select id="lecture-subject-filter" onchange="renderLecturesList()" class="bg-white border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-700 focus:outline-indigo-500 shadow-xs">
+            <option value="all">All Subjects</option>
+          </select>
+        </div>
+
+        <div class="flex gap-1.5 overflow-x-auto pb-0.5">
+          <button onclick="setLectureStatusFilter('all')" id="filter-btn-all" class="pill bg-indigo-600 text-white">All</button>
+          <button onclick="setLectureStatusFilter('pending')" id="filter-btn-pending" class="pill bg-white border border-slate-200 text-slate-600">Pending</button>
+          <button onclick="setLectureStatusFilter('completed')" id="filter-btn-completed" class="pill bg-white border border-slate-200 text-slate-600">Done</button>
+          <button onclick="setLectureStatusFilter('backlog')" id="filter-btn-backlog" class="pill bg-white border border-slate-200 text-slate-600">Backlog</button>
+        </div>
+      </div>
+
+      <!-- Lectures List -->
+      <div id="lectures-container" class="space-y-2">
+        <!-- Populated dynamically -->
+      </div>
+    </section>
+
+    <!-- ==================== VIEW 4: PRACTICE & TESTS ==================== -->
+    <section id="view-practice" class="space-y-3 hidden">
+      <!-- Top Segment Switcher -->
+      <div class="grid grid-cols-3 p-1 bg-slate-200 rounded-xl text-xs font-bold text-center">
+        <button id="seg-btn-tests" onclick="switchPracticeTab('tests')" class="py-1.5 rounded-lg bg-white text-indigo-700 shadow-xs">Tests</button>
+        <button id="seg-btn-questions" onclick="switchPracticeTab('questions')" class="py-1.5 rounded-lg text-slate-600">Questions</button>
+        <button id="seg-btn-revisions" onclick="switchPracticeTab('revisions')" class="py-1.5 rounded-lg text-slate-600">Revisions</button>
+      </div>
+
+      <!-- SUB-TAB 1: TESTS -->
+      <div id="practice-sub-tests" class="space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-sm font-extrabold text-slate-800">JEE Mock & Part Tests</h2>
+            <p class="text-[11px] text-slate-500">Track scores, test dates & syllabus</p>
+          </div>
+          <button onclick="openAddTestModal()" class="pill bg-indigo-600 text-white px-2.5 py-1 shadow-xs">+ Add Test</button>
+        </div>
+        <div id="tests-list-container" class="space-y-2.5">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- SUB-TAB 2: QUESTION PRACTICE -->
+      <div id="practice-sub-questions" class="space-y-3 hidden">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-sm font-extrabold text-slate-800">Question Practice Logs</h2>
+            <p class="text-[11px] text-slate-500">DPPs, modules & extra sheets</p>
+          </div>
+          <button onclick="openLogQuestionsModal()" class="pill bg-emerald-600 text-white px-2.5 py-1 shadow-xs">+ Log Practice</button>
+        </div>
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <div class="touch-card p-2.5 bg-emerald-50 border-emerald-200">
+            <div class="text-base font-black text-emerald-700" id="stat-total-q">0</div>
+            <div class="text-[10px] text-emerald-600 font-semibold">Total Qs</div>
+          </div>
+          <div class="touch-card p-2.5 bg-blue-50 border-blue-200">
+            <div class="text-base font-black text-blue-700" id="stat-correct-q">0</div>
+            <div class="text-[10px] text-blue-600 font-semibold">Correct Qs</div>
+          </div>
+          <div class="touch-card p-2.5 bg-purple-50 border-purple-200">
+            <div class="text-base font-black text-purple-700" id="stat-accuracy-q">0%</div>
+            <div class="text-[10px] text-purple-600 font-semibold">Accuracy</div>
+          </div>
+        </div>
+        <div id="question-logs-container" class="space-y-2">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- SUB-TAB 3: REVISIONS -->
+      <div id="practice-sub-revisions" class="space-y-3 hidden">
+        <div>
+          <h2 class="text-sm font-extrabold text-slate-800">Spaced Repetition & Revisions</h2>
+          <p class="text-[11px] text-slate-500">Stage 1 (3-Day) & Stage 2 (14-Day) tracking</p>
+        </div>
+        <div id="revisions-list-container" class="space-y-2">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== VIEW 5: ANALYTICS & SYNC ==================== -->
+    <section id="view-analytics" class="space-y-4 hidden">
+      <!-- Time Filter Selector -->
+      <div class="flex gap-1.5 overflow-x-auto pb-0.5">
+        <button onclick="setAnalyticsFilter('all_time')" id="af-all" class="pill bg-indigo-600 text-white">All Time</button>
+        <button onclick="setAnalyticsFilter('this_month')" id="af-month" class="pill bg-white border border-slate-200 text-slate-600">This Month</button>
+        <button onclick="setAnalyticsFilter('this_week')" id="af-week" class="pill bg-white border border-slate-200 text-slate-600">This Week</button>
+        <button onclick="setAnalyticsFilter('today')" id="af-today" class="pill bg-white border border-slate-200 text-slate-600">Today</button>
+      </div>
+
+      <!-- Macro Analytics Card -->
+      <div class="touch-card space-y-3">
+        <h2 class="font-extrabold text-sm text-slate-800">JEE Completion Overview</h2>
+        <div class="h-44 w-full flex items-center justify-center">
+          <canvas id="chart-subject-distribution"></canvas>
+        </div>
+      </div>
+
+      <!-- Supabase Cloud Sync Center -->
+      <div class="touch-card space-y-3 bg-gradient-to-br from-slate-900 to-indigo-950 text-white border-slate-800">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <i data-lucide="cloud" class="w-5 h-5 text-sky-400"></i>
+            <div>
+              <h2 class="font-extrabold text-sm">Supabase Cloud Sync</h2>
+              <div class="text-[10px] text-slate-300" id="sync-card-status">Status: Synced</div>
+            </div>
+          </div>
+          <button onclick="syncNow()" id="sync-now-btn" class="pill bg-sky-500 hover:bg-sky-400 text-white font-bold px-3 py-1 shadow-sm transition active:scale-95">
+            Sync Now
+          </button>
+        </div>
+
+        <div class="bg-white/10 rounded-xl p-3 space-y-1.5 text-xs">
+          <div class="flex justify-between">
+            <span class="text-slate-300">Account:</span>
+            <span id="sync-account-email" class="font-bold text-white">Not logged in</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-300">Last Synced:</span>
+            <span id="sync-last-time" class="font-semibold text-slate-200">Never</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-300">Pending Local Changes:</span>
+            <span id="sync-pending-count" class="font-bold text-amber-300">0</span>
+          </div>
+        </div>
+
+        <div class="flex gap-2">
+          <button onclick="openAuthSheet()" id="btn-manage-auth" class="flex-1 py-2 rounded-xl bg-white/10 border border-white/20 text-xs font-bold text-center">
+            Sign In / Switch Account
+          </button>
+          <button onclick="signOutCloud()" id="btn-logout-auth" class="px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-bold hidden">
+            Log Out
+          </button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- BOTTOM NAVIGATION BAR -->
+  <nav class="bottom-nav">
+    <div onclick="switchView('dashboard')" class="bottom-nav-item active" data-view="dashboard">
+      <i data-lucide="layout-dashboard"></i>
+      <span>Dashboard</span>
+    </div>
+    <div onclick="switchView('subjects')" class="bottom-nav-item" data-view="subjects">
+      <i data-lucide="book-open"></i>
+      <span>Subjects</span>
+    </div>
+    <div onclick="switchView('lectures')" class="bottom-nav-item" data-view="lectures">
+      <i data-lucide="check-circle-2"></i>
+      <span>Lectures</span>
+    </div>
+    <div onclick="switchView('practice')" class="bottom-nav-item" data-view="practice">
+      <i data-lucide="target"></i>
+      <span>Practice</span>
+    </div>
+    <div onclick="switchView('analytics')" class="bottom-nav-item" data-view="analytics">
+      <i data-lucide="pie-chart"></i>
+      <span>Analytics</span>
+    </div>
+  </nav>
+
+  <!-- ==================== BOTTOM SHEETS / MODALS ==================== -->
+  
+  <!-- Backdrop -->
+  <div id="sheet-backdrop" class="bottom-sheet-backdrop" onclick="closeAllSheets()"></div>
+
+  <!-- 1. AUTH / LOGIN SHEET -->
+  <div id="sheet-auth" class="bottom-sheet">
+    <div class="sheet-handle"></div>
+    <h2 class="text-base font-extrabold text-slate-800 mb-1">Supabase Account</h2>
+    <p class="text-xs text-slate-500 mb-4">Log in with your AAYUSH 360 Supabase account to synchronize with your PC.</p>
+
+    <form id="auth-form" onsubmit="handleAuthSubmit(event)" class="space-y-3">
+      <div>
+        <label class="text-[11px] font-bold text-slate-700 uppercase">Email Address</label>
+        <input type="email" id="auth-email" required placeholder="aayush@example.com" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1 focus:outline-indigo-600">
+      </div>
+      <div>
+        <label class="text-[11px] font-bold text-slate-700 uppercase">Password</label>
+        <input type="password" id="auth-password" required placeholder="••••••••" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1 focus:outline-indigo-600">
+      </div>
+
+      <div class="pt-2 flex gap-2">
+        <button type="submit" id="btn-auth-signin" class="btn-touch flex-1 bg-indigo-600 text-white font-bold">
+          Sign In
+        </button>
+        <button type="button" onclick="handleSignUp()" id="btn-auth-signup" class="btn-touch bg-slate-100 text-slate-700 font-bold border border-slate-300">
+          Create Account
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 2. ADD LECTURE SHEET -->
+  <div id="sheet-add-lecture" class="bottom-sheet">
+    <div class="sheet-handle"></div>
+    <h2 class="text-base font-extrabold text-slate-800 mb-3">Add / Edit Lecture</h2>
+
+    <form id="add-lecture-form" onsubmit="handleAddLectureSubmit(event)" class="space-y-3">
+      <div>
+        <label class="text-[11px] font-bold text-slate-700 uppercase">Subject</label>
+        <select id="lecture-form-subject" required class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1 font-bold">
+          <!-- Populated dynamically -->
+        </select>
+      </div>
+      <div>
+        <label class="text-[11px] font-bold text-slate-700 uppercase">Chapter Name</label>
+        <input type="text" id="lecture-form-chapter" required placeholder="e.g. Electrostatics" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1">
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-[11px] font-bold text-slate-700 uppercase">Lecture No</label>
+          <input type="number" id="lecture-form-no" required min="1" value="1" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1">
+        </div>
+        <div>
+          <label class="text-[11px] font-bold text-slate-700 uppercase">Scheduled Date</label>
+          <input type="date" id="lecture-form-date" required class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1">
+        </div>
+      </div>
+      <div>
+        <label class="text-[11px] font-bold text-slate-700 uppercase">Lecture / Topic Name</label>
+        <input type="text" id="lecture-form-topic" required placeholder="e.g. Electric Field & Gauss Law" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1">
+      </div>
+
+      <div class="pt-2 flex gap-2">
+        <button type="submit" class="btn-touch flex-1 bg-indigo-600 text-white font-bold">
+          Save Lecture
+        </button>
+        <button type="button" onclick="closeAllSheets()" class="btn-touch bg-slate-100 text-slate-600 font-bold">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 3. LOG QUESTIONS SHEET -->
+  <div id="sheet-log-questions" class="bottom-sheet">
+    <div class="sheet-handle"></div>
+    <h2 class="text-base font-extrabold text-slate-800 mb-3">Log Question Practice / DPP</h2>
+
+    <form id="log-questions-form" onsubmit="handleLogQuestionsSubmit(event)" class="space-y-3">
+      <div>
+        <label class="text-[11px] font-bold text-slate-700 uppercase">Select Lecture / Topic</label>
+        <select id="qlog-lecture-select" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1 font-semibold">
+          <!-- Populated dynamically -->
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-[11px] font-bold text-slate-700 uppercase">Practiced</label>
+          <input type="number" id="qlog-practiced" min="0" value="20" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1">
+        </div>
+        <div>
+          <label class="text-[11px] font-bold text-slate-700 uppercase">Correct</label>
+          <input type="number" id="qlog-correct" min="0" value="18" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1">
+        </div>
+      </div>
+      <div>
+        <label class="text-[11px] font-bold text-slate-700 uppercase">Notes / Key Takeaways</label>
+        <input type="text" id="qlog-notes" placeholder="e.g. Tricky question on flux through cube" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1">
+      </div>
+
+      <div class="pt-2 flex gap-2">
+        <button type="submit" class="btn-touch flex-1 bg-emerald-600 text-white font-bold">
+          Save Practice Log
+        </button>
+        <button type="button" onclick="closeAllSheets()" class="btn-touch bg-slate-100 text-slate-600 font-bold">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 4. ADD TEST SHEET -->
+  <div id="sheet-add-test" class="bottom-sheet">
+    <div class="sheet-handle"></div>
+    <h2 class="text-base font-extrabold text-slate-800 mb-3">Add / Log JEE Test</h2>
+
+    <form id="add-test-form" onsubmit="handleAddTestSubmit(event)" class="space-y-3">
+      <div>
+        <label class="text-[11px] font-bold text-slate-700 uppercase">Test Name</label>
+        <input type="text" id="test-name" required placeholder="e.g. JEE Main Part Test 01" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1">
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-[11px] font-bold text-slate-700 uppercase">Date</label>
+          <input type="date" id="test-date" required class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1">
+        </div>
+        <div>
+          <label class="text-[11px] font-bold text-slate-700 uppercase">Type</label>
+          <select id="test-type" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1 font-bold">
+            <option value="Part Test">Part Test</option>
+            <option value="Full Test">Full Test</option>
+            <option value="Chapter Test">Chapter Test</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-[11px] font-bold text-slate-700 uppercase">Score (out of 300)</label>
+          <input type="number" id="test-score" min="0" max="300" placeholder="e.g. 210" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1">
+        </div>
+        <div>
+          <label class="text-[11px] font-bold text-slate-700 uppercase">Status</label>
+          <select id="test-status" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1 font-bold">
+            <option value="completed">Completed</option>
+            <option value="upcoming">Upcoming</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="text-[11px] font-bold text-slate-700 uppercase">Syllabus / Details</label>
+        <input type="text" id="test-syllabus" placeholder="e.g. Kinematics, Mole Concept, Quadratic" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1">
+      </div>
+
+      <div class="pt-2 flex gap-2">
+        <button type="submit" class="btn-touch flex-1 bg-amber-600 text-white font-bold">
+          Save Test
+        </button>
+        <button type="button" onclick="closeAllSheets()" class="btn-touch bg-slate-100 text-slate-600 font-bold">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- SCRIPTS -->
+  <script src="app.js"></script>
+</body>
+</html>
