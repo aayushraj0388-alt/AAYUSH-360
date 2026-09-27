@@ -209,38 +209,44 @@ function setSetting(key, value) {
   return dbPut('app_settings', { key, value: String(value) });
 }
 
-// Seed default JEE subjects if empty
+// Seed default JEE subjects, chapters, lectures, and tests if empty
 async function seedDefaultSubjectsIfEmpty() {
-  const subjects = await dbGetAll('subjects');
-  if (subjects.length === 0) {
-    const defaultSubjects = [
-      { client_id: 'sub_physics', name: 'Physics', display_name: 'Physics', color: '#ea580c', resource_name: 'Physics Galaxy', weekly_target_val: 6, target_type: 'lectures', sort_order: 1, sync_status: 'pending' },
-      { client_id: 'sub_maths', name: 'Maths', display_name: 'Maths', color: '#db2777', resource_name: 'Cengage / Mohit Tyagi', weekly_target_val: 6, target_type: 'lectures', sort_order: 2, sync_status: 'pending' },
-      { client_id: 'sub_physical_chem', name: 'Physical Chemistry', display_name: 'Physical Chem', color: '#059669', resource_name: 'Neeraj Kumar / Alk Sir', weekly_target_val: 5, target_type: 'lectures', sort_order: 3, sync_status: 'pending' },
-      { client_id: 'sub_inorganic_chem', name: 'Inorganic Chemistry', display_name: 'Inorganic Chem', color: '#0d9488', resource_name: 'VK Jaiswal / NCERT', weekly_target_val: 4, target_type: 'lectures', sort_order: 4, sync_status: 'pending' },
-      { client_id: 'sub_organic_chem', name: 'Organic Chemistry', display_name: 'Organic Chem', color: '#e11d48', resource_name: 'MS Chouhan / NS Sir', weekly_target_val: 5, target_type: 'lectures', sort_order: 5, sync_status: 'pending' }
-    ];
-    await dbPutBatch('subjects', defaultSubjects);
-  }
-}
-
-// ============================================================================
-// 2. SUPABASE INITIALIZATION & AUTH
-// ============================================================================
-
-function initSupabase() {
   try {
-    if (window.supabase) {
-      supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true
+    const subjects = await dbGetAll('subjects');
+    if (subjects.length === 0) {
+      // Try to load pre-packaged seed_data.json
+      let seedLoaded = false;
+      try {
+        const response = await fetch('seed_data.json');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.subjects && data.subjects.length > 0) {
+            await dbPutBatch('subjects', data.subjects);
+            if (data.chapters) await dbPutBatch('chapters', data.chapters);
+            if (data.lectures) await dbPutBatch('lectures', data.lectures);
+            if (data.tests) await dbPutBatch('tests', data.tests);
+            if (data.weekly_targets) await dbPutBatch('weekly_targets', data.weekly_targets);
+            seedLoaded = true;
+            console.log('[IndexedDB] Pre-packaged JEE syllabus successfully seeded into offline storage');
+          }
         }
-      });
-      console.log('[Supabase] Client initialized');
+      } catch (err) {
+        console.warn('[IndexedDB] Could not load seed_data.json, using fallback:', err);
+      }
+
+      if (!seedLoaded) {
+        const defaultSubjects = [
+          { client_id: 'sub_physics', name: 'Physics', display_name: 'Physics', color: '#ea580c', resource_name: 'Physics Galaxy', weekly_target_val: 6, target_type: 'lectures', sort_order: 1, sync_status: 'pending' },
+          { client_id: 'sub_maths', name: 'Maths', display_name: 'Maths', color: '#db2777', resource_name: 'Cengage / Mohit Tyagi', weekly_target_val: 6, target_type: 'lectures', sort_order: 2, sync_status: 'pending' },
+          { client_id: 'sub_physical_chem', name: 'Physical Chemistry', display_name: 'Physical Chem', color: '#059669', resource_name: 'Neeraj Kumar / Alk Sir', weekly_target_val: 5, target_type: 'lectures', sort_order: 3, sync_status: 'pending' },
+          { client_id: 'sub_inorganic_chem', name: 'Inorganic Chemistry', display_name: 'Inorganic Chem', color: '#0d9488', resource_name: 'VK Jaiswal / NCERT', weekly_target_val: 4, target_type: 'lectures', sort_order: 4, sync_status: 'pending' },
+          { client_id: 'sub_organic_chem', name: 'Organic Chemistry', display_name: 'Organic Chem', color: '#e11d48', resource_name: 'MS Chouhan / NS Sir', weekly_target_val: 5, target_type: 'lectures', sort_order: 5, sync_status: 'pending' }
+        ];
+        await dbPutBatch('subjects', defaultSubjects);
+      }
     }
   } catch (err) {
-    console.error('[Supabase] Init error:', err);
+    console.error('[IndexedDB] Seed error:', err);
   }
 }
 
@@ -1048,8 +1054,7 @@ async function renderAnalyticsView() {
 // ============================================================================
 
 function openAuthSheet() {
-  document.getElementById('sheet-backdrop').classList.add('open');
-  document.getElementById('sheet-auth').classList.add('open');
+  // Offline-first mode: No auth sheet needed
 }
 
 async function openAddLectureModal() {
@@ -1198,40 +1203,29 @@ async function handleAddTestSubmit(e) {
 }
 
 // ============================================================================
-// 6. APP BOOTSTRAP
+// 6. APP BOOTSTRAP (OFFLINE-FIRST DIRECT ACCESS)
 // ============================================================================
 
 window.addEventListener('DOMContentLoaded', async () => {
   try {
     await initIndexedDB();
     await seedDefaultSubjectsIfEmpty();
-    initSupabase();
-    await restoreUserSession();
 
-    // Render initial UI
+    // Render initial UI immediately
     switchView('dashboard');
 
-    // Auto-sync on startup & online events
-    if (navigator.onLine && currentUser) {
-      syncNow();
-    }
-
-    window.addEventListener('online', () => {
-      showToast('Back online! Syncing...', 'sync');
-      syncNow();
-    });
-
-    window.addEventListener('offline', () => {
-      setSyncStatus('Offline', 'slate');
-      showToast('Working offline', 'info');
-    });
-
-    // Periodic auto sync every 60s
-    setInterval(() => {
-      if (navigator.onLine && currentUser && !syncInProgress) {
-        syncNow();
-      }
-    }, 60000);
+    // Update offline storage stats in background
+    try {
+      const subjs = await dbGetAll('subjects');
+      const chaps = await dbGetAll('chapters');
+      const lecs = await dbGetAll('lectures');
+      const elS = document.getElementById('storage-subjects-count');
+      const elC = document.getElementById('storage-chapters-count');
+      const elL = document.getElementById('storage-lectures-count');
+      if (elS) elS.textContent = subjs.length;
+      if (elC) elC.textContent = chaps.length;
+      if (elL) elL.textContent = lecs.length;
+    } catch (_) {}
 
     if (window.lucide) lucide.createIcons();
   } catch (err) {
