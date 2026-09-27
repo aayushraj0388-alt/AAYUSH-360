@@ -4013,6 +4013,7 @@ async function renderSettings(container) {
             <button onclick="openCloudAuthModal('signup')" class="px-4 py-2 rounded-lg bg-white hover:bg-sky-50 text-sky-700 font-bold text-xs border border-sky-300 transition flex items-center gap-1.5">
               <i data-lucide="user-plus" class="w-3.5 h-3.5"></i> Create Cloud Account
             </button>
+          ` : `
             <button onclick="handleCloudSyncNow()" class="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5">
               <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Sync Now
             </button>

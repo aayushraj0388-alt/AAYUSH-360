@@ -232,6 +232,8 @@ async function seedDefaultSubjectsIfEmpty() {
     }
   } catch (err) {
     console.error('[IndexedDB] Seed error:', err);
+  }
+}
 // ============================================================================
 // 2. SUPABASE INITIALIZATION & AUTH
 // ============================================================================
@@ -414,50 +416,7 @@ async function signOutCloud() {
   }
 }
 
-async function handleSignUp() {
-  const email = document.getElementById('auth-email').value.trim();
-  const password = document.getElementById('auth-password').value;
 
-  if (!email || !password) {
-    showToast('Please enter email and password', 'error');
-    return;
-  }
-
-  try {
-    setSyncStatus('Registering...', 'amber');
-    const { data, error } = await supabaseClient.auth.signUp({ email, password });
-    if (error) throw error;
-
-    if (data.user) {
-      if (data.session) {
-        currentUser = data.user;
-        updateAuthUI(currentUser.email);
-        showToast('Account created & logged in!', 'success');
-        closeAllSheets();
-        syncNow();
-      } else {
-        showToast('Account created! Please check your email to confirm.', 'success');
-        closeAllSheets();
-      }
-    }
-  } catch (err) {
-    showToast(err.message || 'Registration failed', 'error');
-  }
-}
-
-async function signOutCloud() {
-  try {
-    if (supabaseClient) {
-      await supabaseClient.auth.signOut();
-    }
-    currentUser = null;
-    updateAuthUI(null);
-    setSyncStatus('Logged out', 'slate');
-    showToast('Logged out. Local study data is preserved.', 'info');
-  } catch (err) {
-    console.error('[Auth] Logout error:', err);
-  }
-}
 
 async function markAllPending() {
   const stores = ['subjects', 'chapters', 'lectures', 'tests', 'weekly_targets', 'study_sessions', 'revisions'];
