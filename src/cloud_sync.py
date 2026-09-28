@@ -179,6 +179,9 @@ class CloudSyncEngine:
             is_enabled = self._get_setting(KEY_CLOUD_ENABLED, "false").lower() == "true"
             user_id = self._get_setting(KEY_CLOUD_USER_ID, "")
             
+            print(f"[CloudSync] === SYNC START ===")
+            print(f"[CloudSync] Enabled: {is_enabled}, User ID: {user_id or '(not set)'}")
+            
             if not is_enabled or not user_id:
                 return {"success": False, "error": "Cloud Sync is not logged in or disabled."}
 
@@ -188,18 +191,31 @@ class CloudSyncEngine:
                 self._init_client()
             else:
                 self._restore_session()
+            
+            # Verify auth session is valid
+            try:
+                session = self._client.auth.get_session()
+                print(f"[CloudSync] Auth session: {session.session.user.email if session and session.session else 'NO SESSION'}")
+            except Exception as auth_err:
+                print(f"[CloudSync] Auth session check error: {auth_err}")
 
             # 1. PUSH LOCAL PENDING CHANGES
+            print(f"[CloudSync] Phase 1: Pushing local pending changes...")
             pushed_count = self._push_local_changes(user_id)
+            print(f"[CloudSync] Push complete. Total pushed: {pushed_count}")
 
             # 2. PULL CLOUD CHANGES
             last_sync = self._get_setting(KEY_CLOUD_LAST_SYNC, "")
+            print(f"[CloudSync] Phase 2: Pulling cloud changes (last_sync={last_sync or 'none'})...")
             pulled_count = self._pull_cloud_changes(user_id, last_sync)
+            print(f"[CloudSync] Pull complete. Total pulled: {pulled_count}")
 
             # Record timestamp of successful sync
             now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
             self._set_setting(KEY_CLOUD_LAST_SYNC, now_iso)
             self._set_setting(KEY_CLOUD_SYNC_STATUS, "Synced")
+            
+            print(f"[CloudSync] === SYNC COMPLETE === Pushed: {pushed_count}, Pulled: {pulled_count}")
 
             return {
                 "success": True,
@@ -210,9 +226,12 @@ class CloudSyncEngine:
             }
 
         except Exception as e:
+            import traceback
             error_msg = str(e)
+            tb = traceback.format_exc()
             print(f"[CloudSync] Sync Error: {error_msg}")
-            self._set_setting(KEY_CLOUD_SYNC_STATUS, f"Sync error: {error_msg[:60]}")
+            print(f"[CloudSync] Traceback:\n{tb}")
+            self._set_setting(KEY_CLOUD_SYNC_STATUS, f"Sync error: {error_msg[:80]}")
             return {"success": False, "error": error_msg}
         finally:
             self._lock.release()
@@ -264,6 +283,7 @@ class CloudSyncEngine:
             cur = conn.execute("SELECT * FROM lectures WHERE sync_status = 'pending'")
             rows = [dict(r) for r in cur.fetchall()]
             if rows:
+                print(f"[CloudSync] Pushing {len(rows)} lectures...")
                 # Batch upsert in chunks of 100
                 for i in range(0, len(rows), 100):
                     chunk = rows[i:i+100]
@@ -298,7 +318,14 @@ class CloudSyncEngine:
                         "is_archived": bool(r.get("is_archived", 0)),
                         "deleted_at": r.get("deleted_at")
                     } for r in chunk]
-                    self._client.table("lectures").upsert(payload, on_conflict="user_id,client_id").execute()
+                    for lec_payload in payload:
+                        print(f"[CloudSync]  → Lecture {lec_payload['lecture_no']} ({lec_payload['client_id']}): completed={lec_payload['is_completed']}, dpp={lec_payload['is_dpp_completed']}")
+                    try:
+                        self._client.table("lectures").upsert(payload, on_conflict="user_id,client_id").execute()
+                        print(f"[CloudSync] ✓ Upserted chunk of {len(payload)} lectures")
+                    except Exception as lec_err:
+                        print(f"[CloudSync] ✗ Lecture upsert FAILED: {lec_err}")
+                        raise lec_err
                 conn.execute("UPDATE lectures SET sync_status = 'synced' WHERE sync_status = 'pending'")
                 total_pushed += len(rows)
 

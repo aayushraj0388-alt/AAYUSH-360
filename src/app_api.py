@@ -195,6 +195,14 @@ class AppAPI:
     def get_subjects_and_chapters(self) -> List[Dict[str, Any]]:
         return self.db.get_subjects_and_chapters()
 
+    def get_chapter_hours(self, chapter_id: int) -> Dict[str, Any]:
+        """Returns completed hours and target hours for a Physical Chemistry chapter."""
+        return self.db.get_chapter_hours(chapter_id)
+
+    def toggle_chapter_hour(self, chapter_id: int, hour_no: int) -> Dict[str, Any]:
+        """Toggles an individual hour completion checkbox for a Physical Chemistry chapter."""
+        return self.db.toggle_chapter_hour(chapter_id, hour_no)
+
     def add_chapter(self, subject_id: int, chapter_name: str, target_hours: float = 0.0) -> Dict[str, Any]:
         conn = self.db.get_connection()
         c = conn.cursor()

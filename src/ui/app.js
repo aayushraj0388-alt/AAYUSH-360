@@ -1360,57 +1360,83 @@ async function renderSubjectHub(subjectId, container) {
               <span class="text-slate-300">•</span>
               <span style="color: ${colorInfo.accentColor}; font-extrabold;">${lecProgressPct}% Complete</span>
               <span class="text-slate-300">•</span>
-              <span>${completedLecs}/${totalLecs} Lectures</span>
-              <span class="text-slate-300">•</span>
-              <span class="text-amber-700 font-bold">${completedDpps}/${totalLecs} DPPs</span>
+              ${s.target_type === 'hours' ? `
+                <span>${completedLecs}/${totalLecs} Hours Completed</span>
+              ` : `
+                <span>${completedLecs}/${totalLecs} Lectures</span>
+                <span class="text-slate-300">•</span>
+                <span class="text-amber-700 font-bold">${completedDpps}/${totalLecs} DPPs</span>
+              `}
             </div>
             <p class="text-xs text-slate-600 mt-1 max-w-xl break-words font-medium">
-              Curriculum progress, chapter syllabus breakdown, and daily practice problem tracking.
+              ${s.target_type === 'hours' ? 'Physical Chemistry syllabus tracked by verified study hours.' : 'Curriculum progress, chapter syllabus breakdown, and daily practice problem tracking.'}
             </p>
           </div>
 
           <div class="flex flex-wrap items-center gap-3">
-            <button onclick="openAddLectureModal(${s.id})" class="px-4 py-2.5 rounded-xl text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition active:scale-95 cursor-pointer" style="background-color: ${colorInfo.accentColor};">
-              <i data-lucide="plus" class="w-4 h-4"></i>
-              <span>Add Lecture</span>
-            </button>
+            ${s.target_type !== 'hours' ? `
+              <button onclick="openAddLectureModal(${s.id})" class="px-4 py-2.5 rounded-xl text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition active:scale-95 cursor-pointer" style="background-color: ${colorInfo.accentColor};">
+                <i data-lucide="plus" class="w-4 h-4"></i>
+                <span>Add Lecture</span>
+              </button>
+            ` : `<div></div>`}
           </div>
         </div>
 
-        <!-- Subject Progress (Lectures & DPP) -->
-        <div class="mt-5 pt-4 border-t border-black/5 grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="bg-white/90 p-4 rounded-xl border border-black/5 shadow-xs">
-            <div class="flex items-center justify-between text-xs font-black text-slate-800 mb-1">
-              <span class="flex items-center gap-1.5 uppercase tracking-wide">
-                <i data-lucide="book-open" class="w-4 h-4" style="color: ${colorInfo.accentColor};"></i>
-                Lectures Progress
-              </span>
-              <span class="text-sm font-extrabold" style="color: ${colorInfo.accentColor};">${lecProgressPct}%</span>
-            </div>
-            <div class="text-xs text-slate-600 font-semibold mb-2">
-              <span class="text-slate-900 font-bold">${completedLecs}</span> / ${totalLecs} lectures completed • <span class="text-slate-500 font-normal">${pendingLecs} pending</span>
-            </div>
-            <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden border border-black/5">
-              <div class="h-full rounded-full transition-all duration-300" style="width: ${lecProgressPct}%; background-color: ${colorInfo.accentColor};"></div>
+        <!-- Subject Progress (${s.target_type === 'hours' ? 'Hours' : 'Lectures & DPP'}) -->
+        ${s.target_type === 'hours' ? `
+          <div class="mt-5 pt-4 border-t border-black/5">
+            <div class="bg-white/90 p-4 rounded-xl border border-black/5 shadow-xs">
+              <div class="flex items-center justify-between text-xs font-black text-slate-800 mb-1">
+                <span class="flex items-center gap-1.5 uppercase tracking-wide text-amber-900">
+                  <i data-lucide="clock" class="w-4 h-4 text-amber-500"></i>
+                  Hours Progress
+                </span>
+                <span class="text-sm font-extrabold text-amber-600">${lecProgressPct}%</span>
+              </div>
+              <div class="text-xs text-slate-600 font-semibold mb-2">
+                <span class="text-slate-900 font-bold">${completedLecs}</span> / ${totalLecs} hours completed • <span class="text-slate-500 font-normal">${pendingLecs} pending</span>
+              </div>
+              <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden border border-black/5">
+                <div class="h-full rounded-full transition-all duration-300" style="width: ${lecProgressPct}%; background-color: #f59e0b;"></div>
+              </div>
             </div>
           </div>
+        ` : `
+          <div class="mt-5 pt-4 border-t border-black/5 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="bg-white/90 p-4 rounded-xl border border-black/5 shadow-xs">
+              <div class="flex items-center justify-between text-xs font-black text-slate-800 mb-1">
+                <span class="flex items-center gap-1.5 uppercase tracking-wide">
+                  <i data-lucide="book-open" class="w-4 h-4" style="color: ${colorInfo.accentColor};"></i>
+                  Lectures Progress
+                </span>
+                <span class="text-sm font-extrabold" style="color: ${colorInfo.accentColor};">${lecProgressPct}%</span>
+              </div>
+              <div class="text-xs text-slate-600 font-semibold mb-2">
+                <span class="text-slate-900 font-bold">${completedLecs}</span> / ${totalLecs} lectures completed • <span class="text-slate-500 font-normal">${pendingLecs} pending</span>
+              </div>
+              <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden border border-black/5">
+                <div class="h-full rounded-full transition-all duration-300" style="width: ${lecProgressPct}%; background-color: ${colorInfo.accentColor};"></div>
+              </div>
+            </div>
 
-          <div class="bg-white/90 p-4 rounded-xl border border-black/5 shadow-xs">
-            <div class="flex items-center justify-between text-xs font-black text-slate-800 mb-1">
-              <span class="flex items-center gap-1.5 uppercase tracking-wide text-amber-900">
-                <i data-lucide="file-check-2" class="w-4 h-4 text-amber-500"></i>
-                DPP Progress
-              </span>
-              <span class="text-sm font-extrabold text-amber-600">${dppProgressPct}%</span>
-            </div>
-            <div class="text-xs text-slate-600 font-semibold mb-2">
-              <span class="text-slate-900 font-bold">${completedDpps}</span> / ${totalLecs} DPP completed • <span class="text-slate-500 font-normal">${pendingDpps} pending</span>
-            </div>
-            <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden border border-black/5">
-              <div class="h-full rounded-full transition-all duration-300" style="width: ${dppProgressPct}%; background-color: #f59e0b;"></div>
+            <div class="bg-white/90 p-4 rounded-xl border border-black/5 shadow-xs">
+              <div class="flex items-center justify-between text-xs font-black text-slate-800 mb-1">
+                <span class="flex items-center gap-1.5 uppercase tracking-wide text-amber-900">
+                  <i data-lucide="file-check-2" class="w-4 h-4 text-amber-500"></i>
+                  DPP Progress
+                </span>
+                <span class="text-sm font-extrabold text-amber-600">${dppProgressPct}%</span>
+              </div>
+              <div class="text-xs text-slate-600 font-semibold mb-2">
+                <span class="text-slate-900 font-bold">${completedDpps}</span> / ${totalLecs} DPP completed • <span class="text-slate-500 font-normal">${pendingDpps} pending</span>
+              </div>
+              <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden border border-black/5">
+                <div class="h-full rounded-full transition-all duration-300" style="width: ${dppProgressPct}%; background-color: #f59e0b;"></div>
+              </div>
             </div>
           </div>
-        </div>
+        `}
       </div>
 
       <!-- Search Chapters & Chapter Syllabus Section -->
@@ -1443,7 +1469,10 @@ async function renderSubjectHub(subjectId, container) {
               const chComp = ch.completed_lectures || 0;
               const chDppComp = ch.dpp_completed || 0;
               const chPct = chTot > 0 ? Math.round((chComp / chTot) * 100) : 0;
-              const chStatus = (chComp === chTot && chDppComp === chTot && chTot > 0) ? 'Completed' : ((chComp > 0 || chDppComp > 0) ? 'In Progress' : 'Not Started');
+              const isHours = s.target_type === 'hours';
+              const chStatus = isHours
+                ? (chComp >= chTot && chTot > 0 ? 'Completed' : (chComp > 0 ? 'In Progress' : 'Not Started'))
+                : ((chComp === chTot && chDppComp === chTot && chTot > 0) ? 'Completed' : ((chComp > 0 || chDppComp > 0) ? 'In Progress' : 'Not Started'));
               const chStatusBadge = chStatus === 'Completed' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : (chStatus === 'In Progress' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-slate-100 text-slate-600 border-slate-200');
 
               const chDppPct = chTot > 0 ? Math.round((chDppComp / chTot) * 100) : 0;
@@ -1451,52 +1480,77 @@ async function renderSubjectHub(subjectId, container) {
                 <div onclick="openChapterView(${s.id}, ${ch.id})" class="chapter-card p-4 sm:p-5 flex flex-col justify-between cursor-pointer min-w-0 bg-white border border-slate-200/90 rounded-2xl shadow-xs hover:shadow-md transition">
                   <div class="min-w-0">
                     <div class="flex items-start justify-between gap-2 mb-2.5">
-                      <h3 class="font-extrabold text-sm text-slate-900 break-words leading-snug">${escapeHtml(ch.name)}</h3>
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="text-[10px] font-black px-2 py-0.5 rounded bg-slate-100 text-slate-600 uppercase tracking-wide flex-shrink-0">CH ${ch.sequence_no || '—'}</span>
+                        </div>
+                        <h3 class="font-extrabold text-sm text-slate-900 break-words leading-snug">${escapeHtml(ch.name)}</h3>
+                      </div>
                       <div class="flex items-center gap-1.5 flex-shrink-0">
                         <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border ${chStatusBadge}">${chStatus}</span>
                         <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                          ${chTot} lecs
+                          ${chTot} ${isHours ? 'hours' : 'lecs'}
                         </span>
                       </div>
                     </div>
 
-                    <!-- Dual Parallel Progress Bars (Lectures & DPP) -->
-                    <div class="space-y-2.5 mt-3 pt-2.5 border-t border-slate-100 text-xs">
-                      <!-- Lectures Progress -->
-                      <div>
-                        <div class="flex justify-between items-center text-[11px] font-bold mb-1">
-                          <span class="text-slate-600 flex items-center gap-1">
-                            <i data-lucide="book-open" class="w-3 h-3" style="color: ${colorInfo.accentColor};"></i>
-                            ${chComp} / ${chTot} lectures completed
-                          </span>
-                          <span class="font-black" style="color: ${colorInfo.accentColor};">${chPct}%</span>
-                        </div>
-                        <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                          <div class="h-full rounded-full transition-all duration-300" style="width: ${chPct}%; background-color: ${colorInfo.accentColor};"></div>
+                    ${isHours ? `
+                      <!-- Hours Progress -->
+                      <div class="space-y-2.5 mt-3 pt-2.5 border-t border-slate-100 text-xs">
+                        <div>
+                          <div class="flex justify-between items-center text-[11px] font-bold mb-1">
+                            <span class="text-amber-800 flex items-center gap-1">
+                              <i data-lucide="clock" class="w-3 h-3 text-amber-500"></i>
+                              ${chComp} / ${chTot} hours completed
+                            </span>
+                            <span class="font-black text-amber-600">${chPct}%</span>
+                          </div>
+                          <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                            <div class="h-full rounded-full transition-all duration-300" style="width: ${chPct}%; background-color: #f59e0b;"></div>
+                          </div>
                         </div>
                       </div>
+                    ` : `
+                      <!-- Dual Parallel Progress Bars (Lectures & DPP) -->
+                      <div class="space-y-2.5 mt-3 pt-2.5 border-t border-slate-100 text-xs">
+                        <!-- Lectures Progress -->
+                        <div>
+                          <div class="flex justify-between items-center text-[11px] font-bold mb-1">
+                            <span class="text-slate-600 flex items-center gap-1">
+                              <i data-lucide="book-open" class="w-3 h-3" style="color: ${colorInfo.accentColor};"></i>
+                              ${chComp} / ${chTot} lectures completed
+                            </span>
+                            <span class="font-black" style="color: ${colorInfo.accentColor};">${chPct}%</span>
+                          </div>
+                          <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                            <div class="h-full rounded-full transition-all duration-300" style="width: ${chPct}%; background-color: ${colorInfo.accentColor};"></div>
+                          </div>
+                        </div>
 
-                      <!-- DPP Progress -->
-                      <div>
-                        <div class="flex justify-between items-center text-[11px] font-bold mb-1">
-                          <span class="text-amber-800 flex items-center gap-1">
-                            <i data-lucide="file-check-2" class="w-3 h-3 text-amber-500"></i>
-                            ${chDppComp} / ${chTot} DPP completed
-                          </span>
-                          <span class="font-black text-amber-600">${chDppPct}%</span>
-                        </div>
-                        <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                          <div class="h-full rounded-full transition-all duration-300" style="width: ${chDppPct}%; background-color: #f59e0b;"></div>
+                        <!-- DPP Progress -->
+                        <div>
+                          <div class="flex justify-between items-center text-[11px] font-bold mb-1">
+                            <span class="text-amber-800 flex items-center gap-1">
+                              <i data-lucide="file-check-2" class="w-3 h-3 text-amber-500"></i>
+                              ${chDppComp} / ${chTot} DPP completed
+                            </span>
+                            <span class="font-black text-amber-600">${chDppPct}%</span>
+                          </div>
+                          <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                            <div class="h-full rounded-full transition-all duration-300" style="width: ${chDppPct}%; background-color: #f59e0b;"></div>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    `}
                   </div>
 
                   <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
-                    <button type="button" onclick="event.stopPropagation(); handleRenumberChapterPrompt(${ch.id}, '${escapeJsParam(ch.name)}')" class="text-slate-400 hover:text-indigo-600 flex items-center gap-1 cursor-pointer transition" title="Renumber sequential lectures">
-                      <i data-lucide="list-ordered" class="w-3.5 h-3.5"></i>
-                      <span class="text-[11px]">Renumber</span>
-                    </button>
+                    ${!isHours ? `
+                      <button type="button" onclick="event.stopPropagation(); handleRenumberChapterPrompt(${ch.id}, '${escapeJsParam(ch.name)}')" class="text-slate-400 hover:text-indigo-600 flex items-center gap-1 cursor-pointer transition" title="Renumber sequential lectures">
+                        <i data-lucide="list-ordered" class="w-3.5 h-3.5"></i>
+                        <span class="text-[11px]">Renumber</span>
+                      </button>
+                    ` : `<div></div>`}
                     <span class="flex items-center gap-1 hover:underline font-extrabold" style="color: ${colorInfo.accentColor};">
                       <span>View Chapter</span>
                       <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
@@ -1550,6 +1604,82 @@ async function renderChapterView(subjectId, chapterId, container) {
   if (!ch) return backToSubjectChapters();
 
   const colorInfo = getSubjectColorInfo(s.name);
+
+  // If Physical Chemistry (hours-based subject), render Hours Checklist
+  if (s.target_type === 'hours') {
+    const hoursData = await callApi('get_chapter_hours', { chapter_id: chapterId });
+    const targetHrs = hoursData.target_hours || ch.target_hours || 0;
+    const completedList = hoursData.completed_hours || [];
+    const completedCount = completedList.length;
+    const progressPct = targetHrs > 0 ? Math.round((completedCount / targetHrs) * 100) : 0;
+
+    container.innerHTML = `
+      <div class="space-y-5 min-w-0">
+        <!-- Back Button & Chapter Title Header -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 min-w-0">
+          <div>
+            <button type="button" onclick="backToSubjectChapters()" class="inline-flex items-center gap-1.5 text-xs font-extrabold text-slate-500 hover:text-slate-900 transition mb-1.5 cursor-pointer">
+              <i data-lucide="arrow-left" class="w-4 h-4"></i>
+              <span>Back to ${escapeHtml(s.display_name)}</span>
+            </button>
+            <h1 class="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2 flex-wrap">
+              <span>${escapeHtml(ch.name)}</span>
+            </h1>
+            <div class="text-xs font-semibold text-slate-600 mt-1 flex items-center gap-2 flex-wrap">
+              <span class="font-bold text-slate-900">${targetHrs} Hours Target</span> •
+              <span class="text-amber-700 font-bold">${completedCount} Hours Completed (${progressPct}%)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hours Progress Card -->
+        <div class="modern-card p-4 sm:p-5 bg-white border border-slate-200 shadow-xs rounded-2xl">
+          <div class="flex justify-between items-center text-xs font-extrabold text-slate-800 mb-1">
+            <span class="flex items-center gap-1.5 uppercase tracking-wide text-amber-900">
+              <i data-lucide="clock" class="w-4 h-4 text-amber-500"></i>
+              Hours Progress: <span>${completedCount} / ${targetHrs} hours completed</span>
+            </span>
+            <span class="text-sm font-black text-amber-600">${progressPct}%</span>
+          </div>
+          <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden mt-2">
+            <div class="h-full rounded-full transition-all duration-300" style="width: ${progressPct}%; background-color: #f59e0b;"></div>
+          </div>
+        </div>
+
+        <!-- Hours Checklist -->
+        <div class="modern-card p-4 sm:p-5 bg-white border border-slate-200 shadow-xs rounded-2xl space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+            <h2 class="text-sm font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+              <i data-lucide="check-square" class="w-4 h-4 text-amber-500"></i>
+              Hours Checklist (${targetHrs} Hours)
+            </h2>
+            <span class="text-xs font-bold text-amber-800">${completedCount} / ${targetHrs} Done</span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 pt-2">
+            ${Array.from({ length: targetHrs }, (_, i) => i + 1).map(hourNo => {
+              const isDone = completedList.includes(hourNo);
+              return `
+                <div class="flex items-center gap-3 p-3.5 rounded-xl border transition cursor-pointer select-none ${isDone ? 'bg-amber-50/70 border-amber-300 shadow-xs' : 'bg-white border-slate-200 hover:border-slate-300'}"
+                     onclick="handleChapterHourToggle(${chapterId}, ${hourNo})">
+                  <div class="w-5 h-5 rounded-md border flex items-center justify-center font-bold text-xs transition ${isDone ? 'bg-amber-500 border-amber-600 text-white' : 'border-slate-300 bg-white text-transparent'}">
+                    ✓
+                  </div>
+                  <span class="text-xs font-bold ${isDone ? 'text-amber-950 font-black' : 'text-slate-700'}">
+                    ${hourNo} hour${hourNo > 1 ? 's' : ''}
+                  </span>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
+
   const lectures = await callApi('get_lectures', { chapter_id: chapterId });
   lectures.sort((a, b) => (a.lecture_no || 0) - (b.lecture_no || 0));
   state.chapterLectures = lectures;
@@ -1697,7 +1827,6 @@ async function renderChapterView(subjectId, chapterId, container) {
                           ` : ''}
                         </div>
                         <div class="flex items-center gap-2 flex-shrink-0">
-                          <span class="badge-overdue ${isOverdue ? '' : 'hidden'}" id="ch-lec-overdue-${l.id}">OVERDUE</span>
                           <span class="badge-today ${isToday ? '' : 'hidden'}" id="ch-lec-today-${l.id}">TODAY</span>
                         </div>
                       </div>
@@ -1734,16 +1863,6 @@ async function renderChapterView(subjectId, chapterId, container) {
                 const niceDate = formatDateNice(l.scheduled_date);
                 const dppNum = l.dpp_no || l.lecture_no;
                 const dppLabel = 'DPP ' + dppNum;
-                let cleanDppTitle = '';
-                if (l.topic && l.topic.trim()) {
-                  cleanDppTitle = l.topic.trim();
-                } else if (l.lecture_name) {
-                  if (l.lecture_name.includes(':')) {
-                    cleanDppTitle = l.lecture_name.split(':').slice(1).join(':').trim();
-                  } else if (l.lecture_name !== `Lecture ${l.lecture_no}` && l.lecture_name !== `DPP ${dppNum}`) {
-                    cleanDppTitle = l.lecture_name;
-                  }
-                }
 
                 return `
                   <div class="chapter-check-row flex items-center justify-between p-3 gap-3 ${l.is_dpp_completed ? 'is-done' : ''}" id="ch-dpp-row-${l.id}">
@@ -1760,15 +1879,9 @@ async function renderChapterView(subjectId, chapterId, container) {
                           <span class="font-extrabold text-xs sm:text-sm text-slate-900 ${l.is_dpp_completed ? 'line-through text-slate-400' : ''}" id="ch-dpp-title-${l.id}">
                             ${dppLabel}
                           </span>
-                          ${cleanDppTitle && cleanDppTitle !== `DPP ${dppNum}` ? `
-                            <span class="text-xs text-slate-400 truncate max-w-[200px]" title="${escapeHtml(cleanDppTitle)}" id="ch-dpp-sub-${l.id}">
-                              • ${escapeHtml(cleanDppTitle)}
-                            </span>
-                          ` : ''}
                         </div>
                         <div class="flex items-center gap-2 flex-shrink-0">
                           ${niceDate ? `<span class="text-xs font-semibold text-slate-500 font-mono">${niceDate}</span>` : ''}
-                          <span class="badge-overdue ${isDppOverdue ? '' : 'hidden'}" id="ch-dpp-overdue-${l.id}">OVERDUE</span>
                           <span class="badge-today ${isDppToday ? '' : 'hidden'}" id="ch-dpp-today-${l.id}">TODAY</span>
                         </div>
                       </div>
@@ -1793,6 +1906,17 @@ async function renderChapterView(subjectId, chapterId, container) {
   `;
 
   if (window.lucide) lucide.createIcons();
+}
+
+async function handleChapterHourToggle(chapterId, hourNo) {
+  try {
+    const res = await callApi('toggle_chapter_hour', { chapter_id: chapterId, hour_no: hourNo });
+    if (res && res.success) {
+      renderChapterView(state.selectedSubjectId, chapterId, document.getElementById('view-content'));
+    }
+  } catch (err) {
+    console.error('Failed to toggle chapter hour:', err);
+  }
 }
 
 function handleSearchLecturesInput(e) {
@@ -2261,10 +2385,9 @@ async function renderDPP(container) {
                       <td class="p-3.5">
                         <div class="text-xs text-slate-600 break-words font-medium">${escapeHtml(l.chapter_name)}</div>
                       </td>
-                      <td class="p-3.5 min-w-[220px] max-w-md">
-                        <div class="dpp-title text-xs font-bold text-slate-900 break-words leading-relaxed" title="${escapeHtml(l.lecture_name)}">
-                          ${escapeHtml(l.lecture_name)}
-                        </div>
+                      <td class="p-3.5 min-w-[160px] max-w-md">
+                        <div class="text-xs font-bold text-slate-600">Lecture ${l.lecture_no}</div>
+                        <div class="text-[10px] text-slate-400">${escapeHtml(l.chapter_name || '')}</div>
                       </td>
                       <td class="p-3.5 text-center font-bold text-slate-600">
                         Lec #${l.lecture_no}
@@ -2307,8 +2430,8 @@ async function renderDPP(container) {
                 </div>
 
                 <div class="flex-1 my-1.5 min-w-0">
-                  <h3 class="dpp-title text-sm font-black text-slate-900 break-words leading-snug" title="${escapeHtml(l.lecture_name)}">
-                    ${escapeHtml(l.lecture_name)}
+                  <h3 class="dpp-title text-sm font-black text-slate-900 break-words leading-snug">
+                    Lecture ${l.lecture_no}
                   </h3>
 
                   <div class="text-xs text-slate-600 font-medium break-words mt-2.5 flex items-start gap-1.5">

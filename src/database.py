@@ -2081,34 +2081,165 @@ class DatabaseManager:
         
         subjects = [dict(s) for s in c.execute("SELECT * FROM subjects ORDER BY sort_order;").fetchall()]
         for s in subjects:
-            chaps = c.execute("""
-            SELECT c.*,
-                   COUNT(l.id) as total_lectures,
-                   SUM(CASE WHEN l.is_completed = 1 THEN 1 ELSE 0 END) as completed_lectures,
-                   SUM(CASE WHEN l.is_dpp_completed = 1 THEN 1 ELSE 0 END) as dpp_completed,
-                   SUM(l.questions_practiced) as total_questions,
-                   SUM(l.questions_correct) as correct_questions,
-                   SUM(CASE WHEN l.revision1_done = 1 THEN 1 ELSE 0 END) as rev1_count,
-                   SUM(CASE WHEN l.revision2_done = 1 THEN 1 ELSE 0 END) as rev2_count
-            FROM chapters c
-            LEFT JOIN lectures l ON c.id = l.chapter_id AND l.is_archived = 0
-            WHERE c.subject_id = ?
-            GROUP BY c.id
-            ORDER BY c.sequence_no ASC, c.id ASC;
-            """, (s['id'],)).fetchall()
-            
-            s['chapters'] = []
-            for ch in chaps:
-                ch_dict = dict(ch)
-                tot = ch_dict['total_lectures'] or 0
-                comp = ch_dict['completed_lectures'] or 0
-                dpp = ch_dict['dpp_completed'] or 0
-                ch_dict['progress_pct'] = round((comp / tot) * 100, 1) if tot > 0 else 0
-                ch_dict['dpp_pct'] = round((dpp / tot) * 100, 1) if tot > 0 else 0
-                s['chapters'].append(ch_dict)
+            if s.get('target_type') == 'hours':
+                # Physical Chemistry is hours-based
+                chaps = c.execute("""
+                SELECT c.*,
+                       COALESCE(c.target_hours, 0) as total_hours
+                FROM chapters c
+                WHERE c.subject_id = ?
+                ORDER BY c.sequence_no ASC, c.id ASC;
+                """, (s['id'],)).fetchall()
+
+                s['chapters'] = []
+                for ch in chaps:
+                    ch_dict = dict(ch)
+                    tot = int(ch_dict.get('target_hours') or 0)
+                    comp = c.execute("""
+                        SELECT COUNT(*) FROM study_sessions
+                        WHERE (subject LIKE '%Physical%' OR subject = 'Physical Chemistry')
+                          AND chapter = ?
+                          AND (deleted_at IS NULL OR deleted_at = '')
+                    """, (ch_dict['name'],)).fetchone()[0] or 0
+                    ch_dict['total_lectures'] = tot
+                    ch_dict['completed_lectures'] = comp
+                    ch_dict['dpp_completed'] = 0
+                    ch_dict['progress_pct'] = round((comp / tot) * 100, 1) if tot > 0 else 0
+                    ch_dict['dpp_pct'] = 0
+                    s['chapters'].append(ch_dict)
+            else:
+                chaps = c.execute("""
+                SELECT c.*,
+                       COUNT(l.id) as total_lectures,
+                       SUM(CASE WHEN l.is_completed = 1 THEN 1 ELSE 0 END) as completed_lectures,
+                       SUM(CASE WHEN l.is_dpp_completed = 1 THEN 1 ELSE 0 END) as dpp_completed,
+                       SUM(l.questions_practiced) as total_questions,
+                       SUM(l.questions_correct) as correct_questions,
+                       SUM(CASE WHEN l.revision1_done = 1 THEN 1 ELSE 0 END) as rev1_count,
+                       SUM(CASE WHEN l.revision2_done = 1 THEN 1 ELSE 0 END) as rev2_count
+                FROM chapters c
+                LEFT JOIN lectures l ON c.id = l.chapter_id AND l.is_archived = 0
+                WHERE c.subject_id = ?
+                GROUP BY c.id
+                ORDER BY c.sequence_no ASC, c.id ASC;
+                """, (s['id'],)).fetchall()
+                
+                s['chapters'] = []
+                for ch in chaps:
+                    ch_dict = dict(ch)
+                    tot = ch_dict['total_lectures'] or 0
+                    comp = ch_dict['completed_lectures'] or 0
+                    dpp = ch_dict['dpp_completed'] or 0
+                    ch_dict['progress_pct'] = round((comp / tot) * 100, 1) if tot > 0 else 0
+                    ch_dict['dpp_pct'] = round((dpp / tot) * 100, 1) if tot > 0 else 0
+                    s['chapters'].append(ch_dict)
 
         conn.close()
         return subjects
+
+    def get_chapter_hours(self, chapter_id: int) -> Dict[str, Any]:
+        """Returns completed hour indices and target hours for a Physical Chemistry chapter."""
+        conn = self.get_connection()
+        c = conn.cursor()
+        ch = c.execute("SELECT id, name, target_hours, client_id, subject_id FROM chapters WHERE id = ?;", (chapter_id,)).fetchone()
+        if not ch:
+            conn.close()
+            return {'success': False, 'error': 'Chapter not found'}
+
+        rows = c.execute("""
+            SELECT topic FROM study_sessions
+            WHERE (subject LIKE '%Physical%' OR subject = 'Physical Chemistry')
+              AND chapter = ?
+              AND (deleted_at IS NULL OR deleted_at = '')
+        """, (ch['name'],)).fetchall()
+
+        completed_set = set()
+        for r in rows:
+            topic = r['topic'] or ''
+            if topic.startswith('Hour '):
+                try:
+                    h_num = int(topic.replace('Hour ', '').strip())
+                    completed_set.add(h_num)
+                except ValueError:
+                    pass
+
+        target = int(ch['target_hours'] or 0)
+        conn.close()
+        return {
+            'success': True,
+            'chapter_id': ch['id'],
+            'chapter_name': ch['name'],
+            'target_hours': target,
+            'completed_hours': sorted(list(completed_set)),
+            'total_completed': len(completed_set)
+        }
+
+    def toggle_chapter_hour(self, chapter_id: int, hour_no: int) -> Dict[str, Any]:
+        """Toggles an individual hour completion checkbox for a Physical Chemistry chapter."""
+        conn = self.get_connection()
+        c = conn.cursor()
+        ch = c.execute("SELECT id, name, target_hours, client_id, subject_client_id FROM chapters WHERE id = ?;", (chapter_id,)).fetchone()
+        if not ch:
+            conn.close()
+            return {'success': False, 'error': 'Chapter not found'}
+
+        session_id = f"pch_{ch['client_id']}_h{hour_no}"
+        existing = c.execute("SELECT id, deleted_at FROM study_sessions WHERE external_session_id = ?;", (session_id,)).fetchone()
+
+        is_completed = False
+        if existing:
+            if existing['deleted_at']:
+                c.execute("""
+                    UPDATE study_sessions
+                    SET deleted_at = NULL, sync_status = 'pending', updated_at = datetime('now', 'localtime')
+                    WHERE id = ?;
+                """, (existing['id'],))
+                is_completed = True
+            else:
+                c.execute("""
+                    UPDATE study_sessions
+                    SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending', updated_at = datetime('now', 'localtime')
+                    WHERE id = ?;
+                """, (existing['id'],))
+                is_completed = False
+        else:
+            today_str = datetime.date.today().isoformat()
+            c.execute("""
+                INSERT INTO study_sessions (
+                    client_id, source, external_session_id, date, start_time, end_time,
+                    duration_minutes, duration_hours, subject, chapter, topic, activity, notes,
+                    sync_status, created_at, updated_at
+                ) VALUES (?, 'Physical Chemistry', ?, ?, '00:00:00', '01:00:00', 60.0, 1.0, 'Physical Chemistry', ?, ?, 'Hours', '', 'pending', datetime('now', 'localtime'), datetime('now', 'localtime'));
+            """, (session_id, session_id, today_str, ch['name'], f"Hour {hour_no}"))
+            is_completed = True
+
+        conn.commit()
+
+        rows = c.execute("""
+            SELECT topic FROM study_sessions
+            WHERE (subject LIKE '%Physical%' OR subject = 'Physical Chemistry')
+              AND chapter = ?
+              AND (deleted_at IS NULL OR deleted_at = '')
+        """, (ch['name'],)).fetchall()
+        completed_set = set()
+        for r in rows:
+            topic = r['topic'] or ''
+            if topic.startswith('Hour '):
+                try:
+                    h_num = int(topic.replace('Hour ', '').strip())
+                    completed_set.add(h_num)
+                except ValueError:
+                    pass
+
+        conn.close()
+        return {
+            'success': True,
+            'is_completed': is_completed,
+            'hour_no': hour_no,
+            'completed_hours': sorted(list(completed_set)),
+            'total_completed': len(completed_set),
+            'target_hours': int(ch['target_hours'] or 0)
+        }
 
     # ------------------ WEEKLY TARGETS (PER-WEEK, PER-SUBJECT EDITABLE) ------------------
 
@@ -2998,7 +3129,7 @@ class DatabaseManager:
             subj_id = subj_row['id'] if subj_row else 1
             chap_id = chap_row['id'] if chap_row else 1
 
-            existing = c.execute("SELECT id, is_completed, is_dpp_completed FROM lectures WHERE client_id = ?", (client_id,)).fetchone()
+            existing = c.execute("SELECT id, is_completed, is_dpp_completed, sync_status FROM lectures WHERE client_id = ?", (client_id,)).fetchone()
             is_comp = 1 if r.get('is_completed') else 0
             is_dpp_comp = 1 if r.get('is_dpp_completed') else 0
 
@@ -3006,6 +3137,14 @@ class DatabaseManager:
                 if deleted_at:
                     c.execute("UPDATE lectures SET deleted_at = ?, sync_status = 'synced' WHERE client_id = ?", (deleted_at, client_id))
                 else:
+                    # CONFLICT RESOLUTION: If local has pending changes, keep local data
+                    # (the pending data will be pushed to cloud in the next push cycle)
+                    local_sync_status = existing['sync_status'] or 'synced'
+                    if local_sync_status == 'pending':
+                        print(f"[CloudSync] SKIP merge for lecture {client_id}: local has pending changes (local completed={existing['is_completed']}, cloud completed={is_comp})")
+                        continue
+                    
+                    print(f"[CloudSync] MERGE lecture {client_id}: completed {existing['is_completed']} → {is_comp}, dpp {existing['is_dpp_completed']} → {is_dpp_comp}")
                     c.execute("""
                         UPDATE lectures SET
                             subject_id = ?, chapter_id = ?, subject_client_id = ?, chapter_client_id = ?,
@@ -3030,6 +3169,7 @@ class DatabaseManager:
                     ))
             else:
                 if not deleted_at:
+                    print(f"[CloudSync] INSERT new lecture from cloud: {client_id} completed={is_comp}")
                     c.execute("""
                         INSERT INTO lectures (
                             client_id, subject_id, chapter_id, subject_client_id, chapter_client_id,

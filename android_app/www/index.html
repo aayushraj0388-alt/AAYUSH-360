@@ -53,7 +53,7 @@
         <div class="flex items-center justify-between">
           <div>
             <div class="text-xs font-medium text-indigo-100 uppercase tracking-wider">JEE 2026-2027</div>
-            <h1 class="text-xl font-black mt-0.5" id="dash-greeting">Welcome, Aayush!</h1>
+            <h1 class="text-xl font-black mt-0.5" id="dash-greeting">Welcome back, Aayush</h1>
           </div>
           <div class="text-right">
             <span id="dash-date-pill" class="text-[11px] bg-white/20 backdrop-blur-md px-2.5 py-1 rounded-lg font-bold">Today</span>
@@ -63,7 +63,7 @@
         <!-- Macro Stats Row -->
         <div class="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-white/20 text-center">
           <div class="bg-white/10 rounded-xl p-2">
-            <div class="text-lg font-black" id="dash-lectures-completed">0/0</div>
+            <div class="text-lg font-black" id="dash-lectures-completed">0/398</div>
             <div class="text-[10px] text-indigo-100 font-medium">Lectures Done</div>
           </div>
           <div class="bg-white/10 rounded-xl p-2">
@@ -93,6 +93,77 @@
         </button>
       </div>
 
+      <!-- 1. Study Time / Focus Card (Pomodoro Sync) -->
+      <div id="dash-study-time-card" class="card-amber p-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-900 flex items-center justify-center font-bold">
+              <i data-lucide="clock" class="w-4 h-4 text-amber-700"></i>
+            </div>
+            <div>
+              <h2 class="text-xs font-black text-amber-950 uppercase tracking-wider">Study Time & Focus</h2>
+              <div class="text-[10px] text-amber-800 font-semibold" id="dash-pomo-status">Synced from Pomodoro</div>
+            </div>
+          </div>
+          <button onclick="switchView('analytics', 'study_time')" class="text-xs font-bold text-amber-900 flex items-center gap-1">
+            <span>Analytics</span>
+            <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 text-center pt-1 border-t border-amber-200/60">
+          <div class="bg-white/60 rounded-xl p-2 border border-amber-200/50">
+            <div class="text-base font-black text-amber-950" id="dash-study-today">0h</div>
+            <div class="text-[10px] text-amber-800 font-medium">Today</div>
+          </div>
+          <div class="bg-white/60 rounded-xl p-2 border border-amber-200/50">
+            <div class="text-base font-black text-amber-950" id="dash-study-week">0h</div>
+            <div class="text-[10px] text-amber-800 font-medium">This Week</div>
+          </div>
+          <div class="bg-white/60 rounded-xl p-2 border border-amber-200/50">
+            <div class="text-base font-black text-amber-950" id="dash-study-month">0h</div>
+            <div class="text-[10px] text-amber-800 font-medium">This Month</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Weekly Targets Quota Card -->
+      <div class="touch-card space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <i data-lucide="target" class="w-4 h-4 text-emerald-600"></i>
+            <h2 class="font-extrabold text-sm text-slate-800">Weekly Target Quota</h2>
+          </div>
+          <span id="dash-week-label" class="pill bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px]">Current Week</span>
+        </div>
+
+        <div id="dash-weekly-targets-list" class="space-y-2.5">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- 3. Upcoming JEE Test Card -->
+      <div id="dash-upcoming-test-card" class="touch-card p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-7 h-7 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+              <i data-lucide="award" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <span class="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-purple-200 text-purple-900" id="dash-test-pill-type">JEE Main</span>
+              <h3 class="text-xs font-black text-slate-900 mt-0.5" id="dash-test-name">Test 01</h3>
+            </div>
+          </div>
+          <div class="text-right">
+            <span class="text-xs font-black text-purple-700" id="dash-test-days-left">In -- days</span>
+            <div class="text-[10px] text-slate-500" id="dash-test-date">--</div>
+          </div>
+        </div>
+        <div class="text-[11px] text-slate-600 bg-white/70 p-2 rounded-xl border border-purple-100" id="dash-test-syllabus">
+          Syllabus: Physics, Chemistry & Maths
+        </div>
+      </div>
+
       <!-- Quick Action Floating Bar -->
       <div class="grid grid-cols-3 gap-2">
         <button onclick="openAddLectureModal()" class="touch-card flex items-center justify-center gap-1.5 py-2.5 bg-indigo-50 border-indigo-200 text-indigo-700 font-bold text-xs">
@@ -103,25 +174,12 @@
           <i data-lucide="check-square" class="w-4 h-4"></i>
           <span>Log DPP</span>
         </button>
-        <button onclick="openAddTestModal()" class="touch-card flex items-center justify-center gap-1.5 py-2.5 bg-amber-50 border-amber-200 text-amber-700 font-bold text-xs">
+        <button onclick="openAddTestModal()" class="touch-card flex items-center justify-center gap-1.5 py-2.5 bg-purple-50 border-purple-200 text-purple-700 font-bold text-xs">
           <i data-lucide="award" class="w-4 h-4"></i>
           <span>Log Test</span>
         </button>
       </div>
 
-      <!-- Backlog Banner (Conditional) -->
-      <div id="dash-backlog-card" class="touch-card bg-rose-50 border-rose-200 p-3 flex items-center justify-between hidden">
-        <div class="flex items-center gap-2.5">
-          <div class="w-8 h-8 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center">
-            <i data-lucide="alert-triangle" class="w-4 h-4"></i>
-          </div>
-          <div>
-            <div class="text-xs font-bold text-rose-800" id="dash-backlog-title">0 Backlog Lectures</div>
-            <div class="text-[10px] text-rose-600">Pending past scheduled date</div>
-          </div>
-        </div>
-        <button onclick="switchView('lectures', 'backlog')" class="px-2.5 py-1 rounded-lg bg-rose-600 text-white text-xs font-bold shadow-xs">View</button>
-      </div>
 
       <!-- Today's Schedule & Targets -->
       <div class="touch-card space-y-3">
@@ -199,7 +257,6 @@
           <button onclick="setLectureStatusFilter('all')" id="filter-btn-all" class="pill bg-indigo-600 text-white">All</button>
           <button onclick="setLectureStatusFilter('pending')" id="filter-btn-pending" class="pill bg-white border border-slate-200 text-slate-600">Pending</button>
           <button onclick="setLectureStatusFilter('completed')" id="filter-btn-completed" class="pill bg-white border border-slate-200 text-slate-600">Done</button>
-          <button onclick="setLectureStatusFilter('backlog')" id="filter-btn-backlog" class="pill bg-white border border-slate-200 text-slate-600">Backlog</button>
         </div>
       </div>
 
@@ -272,61 +329,216 @@
       </div>
     </section>
 
-    <!-- ==================== VIEW 5: ANALYTICS & SYNC ==================== -->
+    <!-- ==================== VIEW 5: ANALYTICS & STUDY TIME ==================== -->
     <section id="view-analytics" class="space-y-4 hidden">
-      <!-- Time Filter Selector -->
-      <div class="flex gap-1.5 overflow-x-auto pb-0.5">
-        <button onclick="setAnalyticsFilter('all_time')" id="af-all" class="pill bg-indigo-600 text-white">All Time</button>
-        <button onclick="setAnalyticsFilter('this_month')" id="af-month" class="pill bg-white border border-slate-200 text-slate-600">This Month</button>
-        <button onclick="setAnalyticsFilter('this_week')" id="af-week" class="pill bg-white border border-slate-200 text-slate-600">This Week</button>
-        <button onclick="setAnalyticsFilter('today')" id="af-today" class="pill bg-white border border-slate-200 text-slate-600">Today</button>
+      <!-- Top Segment Switcher -->
+      <div class="grid grid-cols-3 p-1 bg-slate-200 rounded-xl text-xs font-bold text-center">
+        <button id="an-tab-study" onclick="switchAnalyticsTab('study_time')" class="py-1.5 rounded-lg bg-white text-indigo-700 shadow-xs">Study Time</button>
+        <button id="an-tab-jee" onclick="switchAnalyticsTab('jee_overview')" class="py-1.5 rounded-lg text-slate-600">JEE Overview</button>
+        <button id="an-tab-sync" onclick="switchAnalyticsTab('cloud_sync')" class="py-1.5 rounded-lg text-slate-600">Cloud Sync</button>
       </div>
 
-      <!-- Macro Analytics Card -->
-      <div class="touch-card space-y-3">
-        <h2 class="font-extrabold text-sm text-slate-800">JEE Completion Overview</h2>
-        <div class="h-44 w-full flex items-center justify-center">
-          <canvas id="chart-subject-distribution"></canvas>
-        </div>
-      </div>
-
-      <!-- Supabase Cloud Sync Center -->
-      <div class="touch-card space-y-3 bg-gradient-to-br from-slate-900 to-indigo-950 text-white border-slate-800">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <i data-lucide="cloud" class="w-5 h-5 text-sky-400"></i>
+      <!-- SUB-SECTION 1: STUDY TIME & POMODORO ANALYTICS -->
+      <div id="an-sub-study" class="space-y-4">
+        <!-- Top 4 KPI Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div class="card-orange p-3.5 flex flex-col justify-between">
             <div>
-              <h2 class="font-extrabold text-sm">Supabase Cloud Sync</h2>
-              <div class="text-[10px] text-slate-300" id="sync-card-status">Status: Checking...</div>
+              <span class="text-[10px] font-black text-orange-900 uppercase tracking-wider flex items-center gap-1">
+                <i data-lucide="sun" class="w-3.5 h-3.5 text-orange-600"></i> TODAY
+              </span>
+              <div class="text-lg font-black text-orange-950 mt-1" id="pomo-stat-today">0h</div>
+              <div class="text-[11px] font-bold text-orange-900 mt-0.5" id="pomo-stat-today-sub">0 sessions</div>
+            </div>
+            <div class="text-[10px] text-orange-800 font-semibold mt-2 pt-1 border-t border-orange-200/60">Study today</div>
+          </div>
+
+          <div class="card-yellow p-3.5 flex flex-col justify-between">
+            <div>
+              <span class="text-[10px] font-black text-amber-900 uppercase tracking-wider flex items-center gap-1">
+                <i data-lucide="calendar" class="w-3.5 h-3.5 text-amber-600"></i> THIS WEEK
+              </span>
+              <div class="text-lg font-black text-amber-950 mt-1" id="pomo-stat-week">0h</div>
+              <div class="text-[11px] font-bold text-amber-900 mt-0.5" id="pomo-stat-week-sub">0 studied days</div>
+            </div>
+            <div class="text-[10px] text-amber-800 font-semibold mt-2 pt-1 border-t border-amber-200/60">Mon – Sun</div>
+          </div>
+
+          <div class="card-green p-3.5 flex flex-col justify-between">
+            <div>
+              <span class="text-[10px] font-black text-emerald-900 uppercase tracking-wider flex items-center gap-1">
+                <i data-lucide="calendar-range" class="w-3.5 h-3.5 text-emerald-600"></i> THIS MONTH
+              </span>
+              <div class="text-lg font-black text-emerald-950 mt-1" id="pomo-stat-month">0h</div>
+              <div class="text-[11px] font-bold text-emerald-900 mt-0.5" id="pomo-stat-month-sub">0 studied days</div>
+            </div>
+            <div class="text-[10px] text-emerald-800 font-semibold mt-2 pt-1 border-t border-emerald-200/60">Current month</div>
+          </div>
+
+          <div class="card-rose p-3.5 flex flex-col justify-between">
+            <div>
+              <span class="text-[10px] font-black text-rose-900 uppercase tracking-wider flex items-center gap-1">
+                <i data-lucide="archive" class="w-3.5 h-3.5 text-rose-600"></i> TOTAL TIME
+              </span>
+              <div class="text-lg font-black text-rose-950 mt-1" id="pomo-stat-total">0h</div>
+              <div class="text-[11px] font-bold text-rose-900 mt-0.5" id="pomo-stat-total-sub">0 sessions</div>
+            </div>
+            <div class="text-[10px] text-rose-800 font-semibold mt-2 pt-1 border-t border-rose-200/60">All time focus</div>
+          </div>
+        </div>
+
+        <!-- Independence Notice -->
+        <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-start gap-2.5 text-xs text-blue-900">
+          <i data-lucide="info" class="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5"></i>
+          <div>
+            <span class="font-bold">Study time is for analytics only.</span>
+            Pomodoro minutes never mark lectures or DPPs as completed. Lecture completion is strictly manual.
+          </div>
+        </div>
+
+        <!-- Time Filters & Trend Chart -->
+        <div class="touch-card space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="bar-chart-2" class="w-4 h-4 text-amber-500"></i> Study Time Trend
+            </h3>
+            <span class="text-[11px] font-bold text-slate-500" id="pomo-filter-summary">Total: 0h</span>
+          </div>
+
+          <!-- Time Filter Pills -->
+          <div class="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+            <button onclick="setPomodoroTimeFilter('today')" id="pf-today" class="filter-pill">Today</button>
+            <button onclick="setPomodoroTimeFilter('this_week')" id="pf-this_week" class="filter-pill">This Week</button>
+            <button onclick="setPomodoroTimeFilter('last_week')" id="pf-last_week" class="filter-pill">Last Week</button>
+            <button onclick="setPomodoroTimeFilter('this_month')" id="pf-this_month" class="filter-pill">This Month</button>
+            <button onclick="setPomodoroTimeFilter('last_month')" id="pf-last_month" class="filter-pill">Last Month</button>
+            <button onclick="setPomodoroTimeFilter('last_4_weeks')" id="pf-last_4_weeks" class="filter-pill">Last 4 Wk</button>
+            <button onclick="setPomodoroTimeFilter('all_time')" id="pf-all_time" class="filter-pill active">All Time</button>
+          </div>
+
+          <!-- Chart Container -->
+          <div class="h-48 w-full">
+            <canvas id="chart-pomo-filter"></canvas>
+          </div>
+        </div>
+
+        <!-- 28-Day Consistency Matrix -->
+        <div class="touch-card space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <i data-lucide="flame" class="w-4 h-4 text-orange-500"></i> Consistency Matrix
+              </h3>
+              <p class="text-[10px] text-slate-500">28-day activity heatmap</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="pill bg-emerald-50 border border-emerald-200 text-emerald-800" id="heatmap-days-count">0 Days</span>
+              <span class="pill bg-amber-50 border border-amber-200 text-amber-800" id="heatmap-streak-count">🔥 0d Streak</span>
             </div>
           </div>
-          <button onclick="syncNow()" id="sync-now-btn" class="pill bg-sky-500 hover:bg-sky-400 text-white font-bold px-3 py-1 shadow-sm transition active:scale-95">
-            Sync Now
-          </button>
-        </div>
 
-        <div class="bg-white/10 rounded-xl p-3 space-y-1.5 text-xs">
-          <div class="flex justify-between">
-            <span class="text-slate-300">Connected Account:</span>
-            <span id="sync-account-email" class="font-bold text-white truncate max-w-[180px]">Not connected</span>
+          <div id="heatmap-container" class="heatmap-grid">
+            <!-- Dynamic cells -->
           </div>
-          <div class="flex justify-between">
-            <span class="text-slate-300">Last Synced:</span>
-            <span id="sync-last-time" class="font-semibold text-slate-200">Never</span>
-          </div>
-          <div class="flex justify-between">
-            <span class="text-slate-300">Pending Local Changes:</span>
-            <span id="sync-pending-count" class="font-bold text-amber-300">0</span>
+
+          <div class="flex items-center justify-end gap-1.5 text-[10px] font-bold text-slate-500 pt-1 border-t border-slate-100">
+            <span>Less</span>
+            <span class="w-3 h-3 rounded bg-slate-100 border border-slate-200"></span>
+            <span class="w-3 h-3 rounded bg-emerald-100 border border-emerald-200"></span>
+            <span class="w-3 h-3 rounded bg-emerald-300 border border-emerald-400"></span>
+            <span class="w-3 h-3 rounded bg-emerald-500 border border-emerald-600"></span>
+            <span class="w-3 h-3 rounded bg-emerald-700"></span>
+            <span>More</span>
           </div>
         </div>
 
-        <div class="flex gap-2">
-          <button onclick="openAuthSheet()" id="btn-manage-auth" class="flex-1 py-2 rounded-xl bg-white/10 border border-white/20 text-xs font-bold text-center">
-            Link Account
-          </button>
-          <button onclick="signOutCloud()" id="btn-logout-auth" class="px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-bold hidden">
-            Disconnect
-          </button>
+        <!-- Recent Sessions List -->
+        <div class="touch-card space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="list" class="w-4 h-4 text-amber-500"></i> Recent Study Sessions
+            </h3>
+            <span class="text-[10px] text-slate-400" id="recent-sessions-count">0 Sessions</span>
+          </div>
+          <div id="recent-sessions-list" class="space-y-2">
+            <!-- Dynamic session cards -->
+          </div>
+        </div>
+      </div>
+
+      <!-- SUB-SECTION 2: JEE PROGRESS & OVERVIEW -->
+      <div id="an-sub-jee" class="space-y-4 hidden">
+        <!-- Top Macro Stats -->
+        <div class="grid grid-cols-2 gap-2.5">
+          <div class="card-orange p-3.5 space-y-1">
+            <span class="text-[10px] font-black text-orange-900 uppercase">Lectures Syllabus</span>
+            <div class="text-lg font-black text-orange-950" id="an-jee-lec-pct">0%</div>
+            <div class="text-[11px] text-orange-800 font-semibold" id="an-jee-lec-detail">0 / 398 completed</div>
+          </div>
+          <div class="card-green p-3.5 space-y-1">
+            <span class="text-[10px] font-black text-emerald-900 uppercase">DPP Practice</span>
+            <div class="text-lg font-black text-emerald-950" id="an-jee-dpp-pct">0%</div>
+            <div class="text-[11px] text-emerald-800 font-semibold" id="an-jee-dpp-detail">0 / 398 completed</div>
+          </div>
+        </div>
+
+        <!-- Subject Distribution Doughnut Chart -->
+        <div class="touch-card space-y-3">
+          <h2 class="font-extrabold text-xs text-slate-800 uppercase tracking-wider">Subject Syllabus Coverage</h2>
+          <div class="h-44 w-full flex items-center justify-center">
+            <canvas id="chart-subject-distribution"></canvas>
+          </div>
+        </div>
+
+        <!-- Weekly Quota Attainment Summary -->
+        <div class="touch-card space-y-3">
+          <h2 class="font-extrabold text-xs text-slate-800 uppercase tracking-wider">Weekly Quota Attainment</h2>
+          <div id="an-weekly-targets-summary" class="space-y-2">
+            <!-- Dynamic -->
+          </div>
+        </div>
+      </div>
+
+      <!-- SUB-SECTION 3: CLOUD SYNC & ACCOUNT -->
+      <div id="an-sub-sync" class="space-y-4 hidden">
+        <!-- Supabase Cloud Sync Center -->
+        <div class="touch-card space-y-3 bg-gradient-to-br from-slate-900 to-indigo-950 text-white border-slate-800">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <i data-lucide="cloud" class="w-5 h-5 text-sky-400"></i>
+              <div>
+                <h2 class="font-extrabold text-sm">Supabase Cloud Sync</h2>
+                <div class="text-[10px] text-slate-300" id="sync-card-status">Status: Checking...</div>
+              </div>
+            </div>
+            <button onclick="syncNow()" id="sync-now-btn" class="pill bg-sky-500 hover:bg-sky-400 text-white font-bold px-3 py-1 shadow-sm transition active:scale-95">
+              Sync Now
+            </button>
+          </div>
+
+          <div class="bg-white/10 rounded-xl p-3 space-y-1.5 text-xs">
+            <div class="flex justify-between">
+              <span class="text-slate-300">Connected Account:</span>
+              <span id="sync-account-email" class="font-bold text-white truncate max-w-[180px]">Not connected</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-slate-300">Last Synced:</span>
+              <span id="sync-last-time" class="font-semibold text-slate-200">Never</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-slate-300">Pending Local Changes:</span>
+              <span id="sync-pending-count" class="font-bold text-amber-300">0</span>
+            </div>
+          </div>
+
+          <div class="flex gap-2">
+            <button onclick="openAuthSheet()" id="btn-manage-auth" class="flex-1 py-2 rounded-xl bg-white/10 border border-white/20 text-xs font-bold text-center">
+              Link Account
+            </button>
+            <button onclick="signOutCloud()" id="btn-logout-auth" class="px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-bold hidden">
+              Disconnect
+            </button>
+          </div>
         </div>
       </div>
     </section>
