@@ -420,15 +420,17 @@ class AppAPI:
         rtoken = self.cloud_sync._get_setting('cloud_refresh_token')
         uid = self.cloud_sync._get_setting('cloud_user_id')
         email = self.cloud_sync._get_setting('cloud_user_email')
+        password = self.cloud_sync._get_setting('cloud_user_password', '')
         
-        if not token or not rtoken or not uid:
+        if not uid or not email:
             return {'success': False, 'error': 'Windows app is not logged into Cloud Sync yet.'}
             
         payload = json.dumps({
             "access_token": token,
             "refresh_token": rtoken,
             "user_id": uid,
-            "email": email
+            "email": email,
+            "password": password
         })
         encoded = base64.b64encode(payload.encode('utf-8')).decode('utf-8')
         return {

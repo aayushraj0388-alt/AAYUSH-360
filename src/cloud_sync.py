@@ -25,6 +25,7 @@ KEY_CLOUD_USER_ID = 'cloud_user_id'
 KEY_CLOUD_USER_EMAIL = 'cloud_user_email'
 KEY_CLOUD_ACCESS_TOKEN = 'cloud_access_token'
 KEY_CLOUD_REFRESH_TOKEN = 'cloud_refresh_token'
+KEY_CLOUD_USER_PASSWORD = 'cloud_user_password'
 KEY_CLOUD_LAST_SYNC = 'cloud_last_sync_time'
 KEY_CLOUD_SYNC_STATUS = 'cloud_sync_status'
 
@@ -71,17 +72,50 @@ class CloudSyncEngine:
         except Exception as e:
             print(f"[CloudSync] Error setting {key}: {e}")
 
-    def _restore_session(self):
-        """Restores stored auth session from SQLite app_settings."""
-        if not self._client:
+    def _save_session(self, session):
+        """Persists Supabase auth session tokens to SQLite app_settings."""
+        if not session:
             return
+        if hasattr(session, 'access_token') and session.access_token:
+            self._set_setting(KEY_CLOUD_ACCESS_TOKEN, session.access_token)
+        if hasattr(session, 'refresh_token') and session.refresh_token:
+            self._set_setting(KEY_CLOUD_REFRESH_TOKEN, session.refresh_token)
+        user = getattr(session, 'user', None)
+        if user:
+            if hasattr(user, 'id') and user.id:
+                self._set_setting(KEY_CLOUD_USER_ID, user.id)
+            if hasattr(user, 'email') and user.email:
+                self._set_setting(KEY_CLOUD_USER_EMAIL, user.email)
+
+    def _restore_session(self):
+        """Restores stored auth session from SQLite app_settings, refreshing or re-logging in if necessary."""
+        if not self._client:
+            return None
         access_token = self._get_setting(KEY_CLOUD_ACCESS_TOKEN)
         refresh_token = self._get_setting(KEY_CLOUD_REFRESH_TOKEN)
         if access_token and refresh_token:
             try:
-                self._client.auth.set_session(access_token, refresh_token)
+                res = self._client.auth.set_session(access_token, refresh_token)
+                if res and res.session:
+                    self._save_session(res.session)
+                    return res.session
             except Exception as e:
-                print(f"[CloudSync] Session restore failed (will refresh on demand): {e}")
+                print(f"[CloudSync] Session restore failed with tokens: {e}")
+
+        # Fallback to stored credentials if refresh token was rotated or invalidated
+        email = self._get_setting(KEY_CLOUD_USER_EMAIL)
+        password = self._get_setting(KEY_CLOUD_USER_PASSWORD)
+        if email and password:
+            try:
+                print(f"[CloudSync] Auto-reauthenticating user {email}...")
+                res = self._client.auth.sign_in_with_password({"email": email, "password": password})
+                if res and res.session:
+                    self._save_session(res.session)
+                    print(f"[CloudSync] Auto-reauthentication successful!")
+                    return res.session
+            except Exception as ex:
+                print(f"[CloudSync] Auto-reauthentication failed: {ex}")
+        return None
 
     # ------------------ AUTHENTICATION ------------------
 
@@ -92,11 +126,9 @@ class CloudSyncEngine:
                 self._init_client()
             res = self._client.auth.sign_up({"email": email, "password": password})
             if res.user:
+                self._set_setting(KEY_CLOUD_USER_PASSWORD, password)
                 if res.session:
-                    self._set_setting(KEY_CLOUD_ACCESS_TOKEN, res.session.access_token)
-                    self._set_setting(KEY_CLOUD_REFRESH_TOKEN, res.session.refresh_token)
-                    self._set_setting(KEY_CLOUD_USER_ID, res.user.id)
-                    self._set_setting(KEY_CLOUD_USER_EMAIL, res.user.email)
+                    self._save_session(res.session)
                     self._set_setting(KEY_CLOUD_ENABLED, "true")
                     self._set_setting(KEY_CLOUD_SYNC_STATUS, "Connected")
                     # Trigger initial sync
@@ -114,10 +146,8 @@ class CloudSyncEngine:
                 self._init_client()
             res = self._client.auth.sign_in_with_password({"email": email, "password": password})
             if res.user and res.session:
-                self._set_setting(KEY_CLOUD_ACCESS_TOKEN, res.session.access_token)
-                self._set_setting(KEY_CLOUD_REFRESH_TOKEN, res.session.refresh_token)
-                self._set_setting(KEY_CLOUD_USER_ID, res.user.id)
-                self._set_setting(KEY_CLOUD_USER_EMAIL, res.user.email)
+                self._save_session(res.session)
+                self._set_setting(KEY_CLOUD_USER_PASSWORD, password)
                 self._set_setting(KEY_CLOUD_ENABLED, "true")
                 self._set_setting(KEY_CLOUD_SYNC_STATUS, "Connected")
                 
@@ -143,6 +173,7 @@ class CloudSyncEngine:
             self._set_setting(KEY_CLOUD_REFRESH_TOKEN, "")
             self._set_setting(KEY_CLOUD_USER_ID, "")
             self._set_setting(KEY_CLOUD_USER_EMAIL, "")
+            self._set_setting(KEY_CLOUD_USER_PASSWORD, "")
             self._set_setting(KEY_CLOUD_ENABLED, "false")
             self._set_setting(KEY_CLOUD_SYNC_STATUS, "Not connected")
             return {"success": True, "message": "Logged out from Cloud Sync. Local data is intact."}
@@ -179,43 +210,60 @@ class CloudSyncEngine:
             is_enabled = self._get_setting(KEY_CLOUD_ENABLED, "false").lower() == "true"
             user_id = self._get_setting(KEY_CLOUD_USER_ID, "")
             
-            print(f"[CloudSync] === SYNC START ===")
+            print("SYNC START")
             print(f"[CloudSync] Enabled: {is_enabled}, User ID: {user_id or '(not set)'}")
             
             if not is_enabled or not user_id:
+                print("SYNC ERROR\nSTAGE: AUTHENTICATION\nERROR: Cloud Sync is not logged in or disabled.")
+                self._set_setting(KEY_CLOUD_SYNC_STATUS, "Not connected")
                 return {"success": False, "error": "Cloud Sync is not logged in or disabled."}
 
             self._set_setting(KEY_CLOUD_SYNC_STATUS, "Syncing...")
 
             if not self._client:
                 self._init_client()
-            else:
-                self._restore_session()
             
-            # Verify auth session is valid
-            try:
-                session = self._client.auth.get_session()
-                print(f"[CloudSync] Auth session: {session.session.user.email if session and session.session else 'NO SESSION'}")
-            except Exception as auth_err:
-                print(f"[CloudSync] Auth session check error: {auth_err}")
+            # Ensure valid authenticated session
+            session = self._restore_session()
+            if not session:
+                try:
+                    s_resp = self._client.auth.get_session()
+                    session = s_resp if hasattr(s_resp, 'user') else getattr(s_resp, 'session', None)
+                except Exception:
+                    session = None
+
+            if not session:
+                error_msg = "Not authenticated with Supabase. Session restore failed."
+                print(f"SYNC ERROR\nSTAGE: AUTHENTICATION\nERROR: {error_msg}")
+                self._set_setting(KEY_CLOUD_SYNC_STATUS, f"Sync error: {error_msg}")
+                return {"success": False, "error": error_msg}
 
             # 1. PUSH LOCAL PENDING CHANGES
-            print(f"[CloudSync] Phase 1: Pushing local pending changes...")
-            pushed_count = self._push_local_changes(user_id)
-            print(f"[CloudSync] Push complete. Total pushed: {pushed_count}")
+            try:
+                pushed_count = self._push_local_changes(user_id)
+                print(f"UPLOAD RESULT: Pushed {pushed_count} items")
+            except Exception as push_err:
+                print(f"SYNC ERROR\nSTAGE: UPLOAD\nERROR: {push_err}")
+                raise push_err
 
             # 2. PULL CLOUD CHANGES
             last_sync = self._get_setting(KEY_CLOUD_LAST_SYNC, "")
-            print(f"[CloudSync] Phase 2: Pulling cloud changes (last_sync={last_sync or 'none'})...")
-            pulled_count = self._pull_cloud_changes(user_id, last_sync)
-            print(f"[CloudSync] Pull complete. Total pulled: {pulled_count}")
+            try:
+                pulled_count = self._pull_cloud_changes(user_id, last_sync)
+                print(f"DOWNLOAD RESULT: Pulled {pulled_count} items")
+            except Exception as pull_err:
+                print(f"SYNC ERROR\nSTAGE: DOWNLOAD\nERROR: {pull_err}")
+                raise pull_err
+
+            # 3. MERGE CONFIRMATION
+            print("MERGE RESULT: Successfully merged into local SQLite")
 
             # Record timestamp of successful sync
             now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
             self._set_setting(KEY_CLOUD_LAST_SYNC, now_iso)
             self._set_setting(KEY_CLOUD_SYNC_STATUS, "Synced")
             
-            print(f"[CloudSync] === SYNC COMPLETE === Pushed: {pushed_count}, Pulled: {pulled_count}")
+            print(f"SYNC SUCCESS: Pushed: {pushed_count}, Pulled: {pulled_count}")
 
             return {
                 "success": True,
@@ -226,11 +274,8 @@ class CloudSyncEngine:
             }
 
         except Exception as e:
-            import traceback
             error_msg = str(e)
-            tb = traceback.format_exc()
-            print(f"[CloudSync] Sync Error: {error_msg}")
-            print(f"[CloudSync] Traceback:\n{tb}")
+            print(f"SYNC ERROR\nSTAGE: GENERAL\nERROR: {error_msg}")
             self._set_setting(KEY_CLOUD_SYNC_STATUS, f"Sync error: {error_msg[:80]}")
             return {"success": False, "error": error_msg}
         finally:
@@ -240,6 +285,7 @@ class CloudSyncEngine:
         """Pushes pending SQLite rows to Supabase via batch upserts."""
         conn = self.db.get_connection()
         total_pushed = 0
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         try:
             # 1. SUBJECTS
@@ -256,6 +302,7 @@ class CloudSyncEngine:
                     "weekly_target_val": r["weekly_target_val"],
                     "target_type": r["target_type"],
                     "sort_order": r["sort_order"],
+                    "updated_at": now_iso,
                     "deleted_at": r.get("deleted_at")
                 } for r in rows]
                 self._client.table("subjects").upsert(payload, on_conflict="user_id,client_id").execute()
@@ -273,6 +320,7 @@ class CloudSyncEngine:
                     "name": r["name"],
                     "sequence_no": r["sequence_no"],
                     "target_hours": r["target_hours"],
+                    "updated_at": now_iso,
                     "deleted_at": r.get("deleted_at")
                 } for r in rows]
                 self._client.table("chapters").upsert(payload, on_conflict="user_id,client_id").execute()
@@ -316,15 +364,16 @@ class CloudSyncEngine:
                         "is_backlog": bool(r.get("is_backlog", 0)),
                         "notes": r.get("notes", ""),
                         "is_archived": bool(r.get("is_archived", 0)),
+                        "updated_at": now_iso,
                         "deleted_at": r.get("deleted_at")
                     } for r in chunk]
                     for lec_payload in payload:
-                        print(f"[CloudSync]  → Lecture {lec_payload['lecture_no']} ({lec_payload['client_id']}): completed={lec_payload['is_completed']}, dpp={lec_payload['is_dpp_completed']}")
+                        print(f"[CloudSync]  -> Lecture {lec_payload['lecture_no']} ({lec_payload['client_id']}): completed={lec_payload['is_completed']}, dpp={lec_payload['is_dpp_completed']}")
                     try:
                         self._client.table("lectures").upsert(payload, on_conflict="user_id,client_id").execute()
-                        print(f"[CloudSync] ✓ Upserted chunk of {len(payload)} lectures")
+                        print(f"[CloudSync] [OK] Upserted chunk of {len(payload)} lectures")
                     except Exception as lec_err:
-                        print(f"[CloudSync] ✗ Lecture upsert FAILED: {lec_err}")
+                        print(f"[CloudSync] [FAIL] Lecture upsert FAILED: {lec_err}")
                         raise lec_err
                 conn.execute("UPDATE lectures SET sync_status = 'synced' WHERE sync_status = 'pending'")
                 total_pushed += len(rows)
@@ -351,6 +400,7 @@ class CloudSyncEngine:
                     "accuracy": r.get("accuracy", 0),
                     "time_taken_minutes": r.get("time_taken_minutes", 0),
                     "notes": r.get("notes", ""),
+                    "updated_at": now_iso,
                     "deleted_at": r.get("deleted_at")
                 } for r in rows]
                 self._client.table("tests").upsert(payload, on_conflict="user_id,client_id").execute()
@@ -367,6 +417,7 @@ class CloudSyncEngine:
                     "week_start": r["week_start"],
                     "subject_client_id": r.get("subject_client_id", ""),
                     "target_value": r["target_value"],
+                    "updated_at": now_iso,
                     "deleted_at": r.get("deleted_at")
                 } for r in rows]
                 self._client.table("weekly_targets").upsert(payload, on_conflict="user_id,client_id").execute()
@@ -392,6 +443,7 @@ class CloudSyncEngine:
                     "topic": r.get("topic", ""),
                     "activity": r.get("activity", "Other"),
                     "notes": r.get("notes", ""),
+                    "updated_at": now_iso,
                     "deleted_at": r.get("deleted_at")
                 } for r in rows]
                 self._client.table("study_sessions").upsert(payload, on_conflict="user_id,client_id").execute()
@@ -411,6 +463,7 @@ class CloudSyncEngine:
                     "completed_at": r.get("completed_at"),
                     "scheduled_date": r.get("scheduled_date"),
                     "notes": r.get("notes", ""),
+                    "updated_at": now_iso,
                     "deleted_at": r.get("deleted_at")
                 } for r in rows]
                 self._client.table("revisions").upsert(payload, on_conflict="user_id,client_id").execute()
@@ -426,11 +479,20 @@ class CloudSyncEngine:
     def _pull_cloud_changes(self, user_id: str, last_sync: str) -> int:
         """Pulls changes from Supabase updated since last_sync and applies them to SQLite."""
         total_pulled = 0
+        filter_time = None
+        if last_sync:
+            try:
+                # 1-minute safety buffer against clock skew
+                dt = datetime.datetime.fromisoformat(last_sync) - datetime.timedelta(minutes=1)
+                filter_time = dt.isoformat()
+            except Exception:
+                filter_time = last_sync
+
         try:
             # 1. PULL SUBJECTS
             query = self._client.table("subjects").select("*").eq("user_id", user_id)
-            if last_sync:
-                query = query.gt("updated_at", last_sync)
+            if filter_time:
+                query = query.gt("updated_at", filter_time)
             res = query.execute()
             if res.data:
                 self.db.merge_cloud_subjects(res.data)
@@ -438,8 +500,8 @@ class CloudSyncEngine:
 
             # 2. PULL CHAPTERS
             query = self._client.table("chapters").select("*").eq("user_id", user_id)
-            if last_sync:
-                query = query.gt("updated_at", last_sync)
+            if filter_time:
+                query = query.gt("updated_at", filter_time)
             res = query.execute()
             if res.data:
                 self.db.merge_cloud_chapters(res.data)
@@ -447,8 +509,8 @@ class CloudSyncEngine:
 
             # 3. PULL LECTURES
             query = self._client.table("lectures").select("*").eq("user_id", user_id)
-            if last_sync:
-                query = query.gt("updated_at", last_sync)
+            if filter_time:
+                query = query.gt("updated_at", filter_time)
             res = query.execute()
             if res.data:
                 self.db.merge_cloud_lectures(res.data)
@@ -456,8 +518,8 @@ class CloudSyncEngine:
 
             # 4. PULL TESTS
             query = self._client.table("tests").select("*").eq("user_id", user_id)
-            if last_sync:
-                query = query.gt("updated_at", last_sync)
+            if filter_time:
+                query = query.gt("updated_at", filter_time)
             res = query.execute()
             if res.data:
                 self.db.merge_cloud_tests(res.data)
@@ -465,8 +527,8 @@ class CloudSyncEngine:
 
             # 5. PULL WEEKLY TARGETS
             query = self._client.table("weekly_targets").select("*").eq("user_id", user_id)
-            if last_sync:
-                query = query.gt("updated_at", last_sync)
+            if filter_time:
+                query = query.gt("updated_at", filter_time)
             res = query.execute()
             if res.data:
                 self.db.merge_cloud_weekly_targets(res.data)
@@ -474,8 +536,8 @@ class CloudSyncEngine:
 
             # 6. PULL STUDY SESSIONS
             query = self._client.table("study_sessions").select("*").eq("user_id", user_id)
-            if last_sync:
-                query = query.gt("updated_at", last_sync)
+            if filter_time:
+                query = query.gt("updated_at", filter_time)
             res = query.execute()
             if res.data:
                 self.db.merge_cloud_study_sessions(res.data)
@@ -483,8 +545,8 @@ class CloudSyncEngine:
 
             # 7. PULL REVISIONS
             query = self._client.table("revisions").select("*").eq("user_id", user_id)
-            if last_sync:
-                query = query.gt("updated_at", last_sync)
+            if filter_time:
+                query = query.gt("updated_at", filter_time)
             res = query.execute()
             if res.data:
                 self.db.merge_cloud_revisions(res.data)

@@ -212,12 +212,12 @@
       </div>
     </section>
 
-    <!-- ==================== VIEW 2: SUBJECTS & CHAPTERS ==================== -->
+    <!-- ==================== VIEW 2: SYLLABUS & CHAPTERS ==================== -->
     <section id="view-subjects" class="space-y-3 hidden">
       <div class="flex items-center justify-between">
         <div>
-          <h1 class="text-lg font-black text-slate-800">Subjects & Chapters</h1>
-          <p class="text-xs text-slate-500">Tap a chapter to inspect lectures</p>
+          <h1 class="text-lg font-black text-slate-800">Syllabus</h1>
+          <p class="text-xs text-slate-500">Track subjects, branches & chapters</p>
         </div>
       </div>
 
@@ -228,6 +228,13 @@
 
       <!-- Chapter List -->
       <div id="chapters-list-container" class="space-y-2.5">
+        <!-- Populated dynamically -->
+      </div>
+    </section>
+
+    <!-- ==================== VIEW: PHYSICAL CHEMISTRY HOUR TRACKER ==================== -->
+    <section id="view-pchem" class="space-y-3 hidden">
+      <div id="pchem-hours-container" class="space-y-3">
         <!-- Populated dynamically -->
       </div>
     </section>
@@ -553,7 +560,7 @@
     </div>
     <div onclick="switchView('subjects')" class="bottom-nav-item" data-view="subjects">
       <i data-lucide="book-open"></i>
-      <span>Subjects</span>
+      <span>Syllabus</span>
     </div>
     <div onclick="switchView('lectures')" class="bottom-nav-item" data-view="lectures">
       <i data-lucide="check-circle-2"></i>

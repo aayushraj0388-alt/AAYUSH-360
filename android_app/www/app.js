@@ -238,6 +238,17 @@ function dbPutBatch(storeName, items) {
   });
 }
 
+function dbDelete(storeName, key) {
+  return new Promise((resolve, reject) => {
+    if (!db) return resolve(null);
+    const tx = db.transaction([storeName], 'readwrite');
+    const store = tx.objectStore(storeName);
+    const req = store.delete(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
 function dbGetPending(storeName) {
   return new Promise((resolve, reject) => {
     if (!db) return resolve([]);
@@ -262,18 +273,20 @@ function setSetting(key, value) {
   return dbPut('app_settings', { key, value: String(value) });
 }
 
-// Seed default syllabus structure from INITIAL_SEED_DATA if fresh install
+// Seed default syllabus structure from INITIAL_SEED_DATA if fresh install or incomplete
 async function seedDefaultSubjectsIfEmpty() {
   try {
-    const lectures = await dbGetAll('lectures');
-    const chapters = await dbGetAll('chapters');
+    if (!window.INITIAL_SEED_DATA) return;
+    const data = window.INITIAL_SEED_DATA;
+
     const subjects = await dbGetAll('subjects');
+    const chapters = await dbGetAll('chapters');
+    const lectures = await dbGetAll('lectures');
 
-    const needsSeed = lectures.length === 0 || chapters.length === 0 || subjects.length === 0;
+    const needsFullSeed = subjects.length === 0 || chapters.length === 0;
 
-    if (needsSeed && window.INITIAL_SEED_DATA) {
-      const data = window.INITIAL_SEED_DATA;
-      console.log('[IndexedDB] Seeding full JEE data from INITIAL_SEED_DATA...');
+    if (needsFullSeed) {
+      console.log('[IndexedDB] Seeding full JEE dataset from INITIAL_SEED_DATA...');
       if (data.subjects && data.subjects.length > 0) await dbPutBatch('subjects', data.subjects);
       if (data.chapters && data.chapters.length > 0) await dbPutBatch('chapters', data.chapters);
       if (data.lectures && data.lectures.length > 0) await dbPutBatch('lectures', data.lectures);
@@ -286,39 +299,135 @@ async function seedDefaultSubjectsIfEmpty() {
   }
 }
 
-// Migration: Fix chapter sequence_no values in existing IndexedDB data
-// Runs on every startup but only patches chapters that have wrong sequence_no
+// Migration: Ensure all 91 chapters and 398 lectures exist with canonical sequence_no and names
+// Preserves all existing user progress, completions, and study sessions
 async function migrateChapterSequenceNumbers() {
   try {
-    const migrationVersion = '2026-09-28-v1';
-    const done = await getSetting('chapter_seq_migration', '');
-    if (done === migrationVersion) return; // Already migrated
-
     if (!window.INITIAL_SEED_DATA || !window.INITIAL_SEED_DATA.chapters) return;
 
     const seedChapters = window.INITIAL_SEED_DATA.chapters;
-    const seedMap = {};
-    seedChapters.forEach(ch => { seedMap[ch.client_id] = ch.sequence_no; });
+    const seedLectures = window.INITIAL_SEED_DATA.lectures || [];
+    const seedSubjects = window.INITIAL_SEED_DATA.subjects || [];
 
     const localChapters = await dbGetAll('chapters');
-    const toUpdate = [];
+    const localLectures = await dbGetAll('lectures');
+    const localSubjects = await dbGetAll('subjects');
 
-    localChapters.forEach(ch => {
-      const canonicalSeq = seedMap[ch.client_id];
-      if (canonicalSeq !== undefined && ch.sequence_no !== canonicalSeq) {
-        ch.sequence_no = canonicalSeq;
-        toUpdate.push(ch);
+    const migrationVersion = '2026-09-28-v5-audit-repair';
+    const done = await getSetting('chapter_seq_migration', '');
+    if (done === migrationVersion && localChapters.length === 91 && localLectures.length >= 398) {
+      return; // Already up to date
+    }
+
+    console.log('[Migration] Verifying and repairing syllabus integrity...');
+
+    // 1. Ensure all 5 subjects exist
+    const localSubCids = new Set(localSubjects.map(s => s.client_id));
+    const subsToInsert = [];
+    seedSubjects.forEach(ss => {
+      if (!localSubCids.has(ss.client_id)) {
+        subsToInsert.push({ ...ss, sync_status: 'synced' });
+      }
+    });
+    if (subsToInsert.length > 0) {
+      await dbPutBatch('subjects', subsToInsert);
+      console.log(`[Migration] Inserted ${subsToInsert.length} missing subjects`);
+    }
+
+    // 2. Ensure all 91 chapters exist with exact canonical sequence_no and name
+    const localChMap = new Map(localChapters.map(c => [c.client_id, c]));
+    const chsToInsert = [];
+    const chsToUpdate = [];
+
+    seedChapters.forEach(canonical => {
+      const existing = localChMap.get(canonical.client_id);
+      if (!existing) {
+        chsToInsert.push({ ...canonical, sync_status: 'synced' });
+      } else {
+        let changed = false;
+        if (existing.sequence_no !== canonical.sequence_no) {
+          existing.sequence_no = canonical.sequence_no;
+          changed = true;
+        }
+        if (canonical.name && existing.name !== canonical.name) {
+          existing.name = canonical.name;
+          changed = true;
+        }
+        if (canonical.subject_client_id && existing.subject_client_id !== canonical.subject_client_id) {
+          existing.subject_client_id = canonical.subject_client_id;
+          changed = true;
+        }
+        if (canonical.target_hours !== undefined && existing.target_hours !== canonical.target_hours) {
+          existing.target_hours = canonical.target_hours;
+          changed = true;
+        }
+        if (changed) {
+          chsToUpdate.push(existing);
+        }
       }
     });
 
-    if (toUpdate.length > 0) {
-      await dbPutBatch('chapters', toUpdate);
-      console.log(`[Migration] Fixed sequence_no for ${toUpdate.length} chapters`);
-    } else {
-      console.log('[Migration] Chapter sequence_no: all OK');
+    if (chsToInsert.length > 0) {
+      await dbPutBatch('chapters', chsToInsert);
+      console.log(`[Migration] Inserted ${chsToInsert.length} missing chapters`);
+    }
+    if (chsToUpdate.length > 0) {
+      await dbPutBatch('chapters', chsToUpdate);
+      console.log(`[Migration] Updated ${chsToUpdate.length} chapters with canonical sequence_no`);
+    }
+
+    // 3. Ensure all 398 canonical lectures exist without wiping progress
+    const localLecMap = new Map(localLectures.map(l => [l.client_id, l]));
+    const lecsToInsert = [];
+    const lecsToUpdate = [];
+
+    seedLectures.forEach(sl => {
+      const existing = localLecMap.get(sl.client_id);
+      if (!existing) {
+        lecsToInsert.push({ ...sl, sync_status: 'synced' });
+      } else {
+        let changed = false;
+        if (sl.lecture_name && existing.lecture_name !== sl.lecture_name) {
+          existing.lecture_name = sl.lecture_name;
+          changed = true;
+        }
+        if (sl.topic && existing.topic !== sl.topic) {
+          existing.topic = sl.topic;
+          changed = true;
+        }
+        if (sl.chapter_client_id && existing.chapter_client_id !== sl.chapter_client_id) {
+          existing.chapter_client_id = sl.chapter_client_id;
+          changed = true;
+        }
+        if (changed) {
+          lecsToUpdate.push(existing);
+        }
+      }
+    });
+
+    if (lecsToInsert.length > 0) {
+      await dbPutBatch('lectures', lecsToInsert);
+      console.log(`[Migration] Inserted ${lecsToInsert.length} missing lectures`);
+    }
+    if (lecsToUpdate.length > 0) {
+      await dbPutBatch('lectures', lecsToUpdate);
+      console.log(`[Migration] Updated ${lecsToUpdate.length} lecture metadata (progress preserved)`);
+    }
+
+    // 4. Ensure Physical Chemistry has ZERO lecture records
+    const pchemBadLecs = localLectures.filter(l => 
+      l.subject_client_id === 'subj_physical_chemistry' || 
+      (l.chapter_client_id && seedChapters.find(sc => sc.client_id === l.chapter_client_id && sc.subject_client_id === 'subj_physical_chemistry'))
+    );
+    if (pchemBadLecs.length > 0) {
+      console.log(`[Migration] Removing ${pchemBadLecs.length} invalid lecture records from Physical Chemistry`);
+      for (const bl of pchemBadLecs) {
+        await dbDelete('lectures', bl.client_id);
+      }
     }
 
     await setSetting('chapter_seq_migration', migrationVersion);
+    console.log('[Migration] Syllabus migration complete: 91 chapters, 398 lectures verified.');
   } catch (err) {
     console.error('[Migration] Chapter seq migration error:', err);
   }
@@ -337,6 +446,21 @@ function initSupabase() {
           autoRefreshToken: true
         }
       });
+      supabaseClient.auth.onAuthStateChange(async (event, session) => {
+        if (session && session.user) {
+          currentUser = session.user;
+          await setSetting('cloud_access_token', session.access_token);
+          await setSetting('cloud_refresh_token', session.refresh_token);
+          await setSetting('cloud_user_id', session.user.id);
+          await setSetting('cloud_user_email', session.user.email);
+          await setSetting('cloud_sync_enabled', 'true');
+          updateAuthUI(session.user.email);
+        } else if (event === 'SIGNED_OUT') {
+          currentUser = null;
+          updateAuthUI(null);
+          setSyncStatus('Offline / Local', 'slate');
+        }
+      });
       console.log('[Supabase] Client initialized successfully');
     } else {
       console.warn('[Supabase] window.supabase not available');
@@ -351,7 +475,7 @@ async function restoreUserSession() {
   if (!supabaseClient) return null;
 
   try {
-    // 1. Check client session
+    // 1. Check existing client session in memory / localStorage
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session && session.user) {
       currentUser = session.user;
@@ -360,12 +484,25 @@ async function restoreUserSession() {
       return currentUser;
     }
 
-    // 2. Check stored tokens in app_settings fallback
+    // 2. Check stored credentials (auto-reauth to avoid stale refresh token crashes)
+    const storedEmail = await getSetting('cloud_user_email');
+    const storedPassword = await getSetting('cloud_user_password');
+    if (storedEmail && storedPassword) {
+      const { data, error } = await supabaseClient.auth.signInWithPassword({
+        email: storedEmail,
+        password: storedPassword
+      });
+      if (!error && data && data.user) {
+        currentUser = data.user;
+        updateAuthUI(currentUser.email);
+        setSyncStatus('Connected', 'emerald');
+        return currentUser;
+      }
+    }
+
+    // 3. Fallback: stored tokens
     const storedToken = await getSetting('cloud_access_token');
     const storedRefreshToken = await getSetting('cloud_refresh_token');
-    const storedUserId = await getSetting('cloud_user_id');
-    const storedEmail = await getSetting('cloud_user_email');
-
     if (storedToken && storedRefreshToken) {
       const { data, error } = await supabaseClient.auth.setSession({
         access_token: storedToken,
@@ -382,6 +519,7 @@ async function restoreUserSession() {
     console.error('[Supabase] Restore session error:', err);
   }
 
+  currentUser = null;
   updateAuthUI(null);
   setSyncStatus('Offline / Local', 'slate');
   return null;
@@ -428,29 +566,64 @@ async function startQrScanner() {
       if (html5QrScanner) {
         try { await html5QrScanner.stop(); } catch(_) {}
       }
-      html5QrScanner = new Html5Qrcode("qr-reader");
-      const config = { 
-        fps: 15, 
+      // Initialize with hardware acceleration and QR_CODE format only
+      html5QrScanner = new Html5Qrcode("qr-reader", {
+        formatsToSupport: [0 /* Html5QrcodeSupportedFormats.QR_CODE */],
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true
+        },
+        verbose: false
+      });
+
+      // Request high-resolution back camera for dense QR scanning
+      const cameraConfig = {
+        facingMode: "environment"
+      };
+
+      const scanConfig = { 
+        fps: 10,
         qrbox: (viewfinderWidth, viewfinderHeight) => {
-          const edge = Math.min(viewfinderWidth * 0.9, viewfinderHeight * 0.9, 280);
-          return { width: Math.floor(edge), height: Math.floor(edge) };
+          // Dynamic square maximizing scan area without cropping out dense codes
+          const edge = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.95);
+          return { width: Math.max(edge, 240), height: Math.max(edge, 240) };
+        },
+        aspectRatio: 1.0,
+        disableFlip: false,
+        videoConstraints: {
+          facingMode: "environment",
+          width: { min: 640, ideal: 1280, max: 1920 },
+          height: { min: 480, ideal: 720, max: 1080 }
         }
       };
+
       await html5QrScanner.start(
-        { facingMode: "environment" },
-        config,
+        cameraConfig,
+        scanConfig,
         (decodedText) => {
+          console.log('[QR] Detected payload from camera');
           stopQrScanner();
           applyPairingPayload(decodedText);
         },
-        () => {}
+        (errorMessage) => {
+          // Normal frame scan attempt, ignore
+        }
       );
     } else {
       showToast('QR scanner library not ready', 'error');
     }
   } catch (err) {
     console.error('[QR] Scanner start error:', err);
-    showToast(`Camera permission / scan error: ${err.message || err}`, 'error');
+    let msg = 'Failed to start camera';
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      msg = 'Camera permission denied. Please grant camera permission or paste pairing code below.';
+    } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      msg = 'No camera found. Please paste pairing code below.';
+    } else if (err.name === 'NotReadableError') {
+      msg = 'Camera is in use by another app.';
+    } else {
+      msg = `Camera error: ${err.message || err}`;
+    }
+    showToast(msg, 'error');
     stopQrScanner();
   }
 }
@@ -516,38 +689,64 @@ async function applyPairingPayload(payloadStr) {
       }
     } catch (parseErr) {
       console.error('[Pairing] Parse error:', parseErr);
-      throw new Error('Invalid pairing string. Please copy directly from Windows PC Settings.');
+      throw new Error('Invalid or unsupported QR / pairing code. Please scan the pairing QR code from Windows PC Settings.');
     }
 
-    if (!payload || !payload.access_token || !payload.refresh_token) {
-      throw new Error('Pairing string is missing authentication tokens.');
+    if (!payload || typeof payload !== 'object' || (!payload.password && (!payload.access_token || !payload.refresh_token))) {
+      throw new Error('Malformed pairing payload. Missing authentication tokens.');
     }
 
     setSyncStatus('Pairing...', 'amber');
     showToast('Linking with Windows PC account...', 'info');
     if (!supabaseClient) initSupabase();
 
-    const { data, error } = await supabaseClient.auth.setSession({
-      access_token: payload.access_token,
-      refresh_token: payload.refresh_token
-    });
-    if (error) {
-      console.warn('[Pairing] setSession warning:', error);
+    currentUser = null;
+
+    // Prefer dedicated credential login so Android gets its own independent session
+    if (payload.email && payload.password) {
+      const { data, error } = await supabaseClient.auth.signInWithPassword({
+        email: payload.email,
+        password: payload.password
+      });
+      if (!error && data && data.user) {
+        currentUser = data.user;
+        await setSetting('cloud_user_password', payload.password);
+      } else {
+        console.warn('[Pairing] signInWithPassword failed, falling back to setSession:', error);
+      }
     }
 
-    currentUser = (data && data.user) ? data.user : { id: payload.user_id, email: payload.email };
+    // Fallback to session tokens if password login was not used or failed
+    if (!currentUser && payload.access_token && payload.refresh_token) {
+      const { data, error } = await supabaseClient.auth.setSession({
+        access_token: payload.access_token,
+        refresh_token: payload.refresh_token
+      });
+      if (!error && data && data.user) {
+        currentUser = data.user;
+      } else if (error) {
+        throw new Error(`Authentication error: ${error.message || error}`);
+      }
+    }
 
-    // Persist session tokens in app_settings
-    await setSetting('cloud_access_token', payload.access_token);
-    await setSetting('cloud_refresh_token', payload.refresh_token);
-    await setSetting('cloud_user_id', currentUser.id || payload.user_id);
-    await setSetting('cloud_user_email', currentUser.email || payload.email);
+    if (!currentUser || !currentUser.id) {
+      throw new Error('Pairing failed: Could not establish valid Supabase user session.');
+    }
+
+    // Persist session tokens and user metadata in app_settings
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) {
+      await setSetting('cloud_access_token', session.access_token);
+      await setSetting('cloud_refresh_token', session.refresh_token);
+    }
+    await setSetting('cloud_user_id', currentUser.id);
+    await setSetting('cloud_user_email', currentUser.email);
     await setSetting('cloud_sync_enabled', 'true');
     // Clear last sync time to force a full cloud pull on new pairing
     await setSetting('cloud_last_sync_time', '');
 
-    updateAuthUI(currentUser.email || payload.email);
-    showToast(`Paired successfully as ${currentUser.email || 'PC Account'}! Downloading data...`, 'success');
+    updateAuthUI(currentUser.email);
+    showToast(`Paired successfully as ${currentUser.email}! Downloading data...`, 'success');
     closeAllSheets();
 
     // Immediately pull full cloud database
@@ -568,6 +767,7 @@ async function signOutCloud() {
     currentUser = null;
     await setSetting('cloud_access_token', '');
     await setSetting('cloud_refresh_token', '');
+    await setSetting('cloud_user_password', '');
     await setSetting('cloud_user_id', '');
     await setSetting('cloud_user_email', '');
     await setSetting('cloud_sync_enabled', 'false');
@@ -618,47 +818,68 @@ async function updatePendingCountUI() {
 async function syncNow() {
   if (syncInProgress) return;
   if (!supabaseClient || !currentUser) {
-    console.log('[Sync] Not logged in, skipping cloud sync');
-    setSyncStatus('Offline / Local', 'slate');
+    console.error('SYNC ERROR\nSTAGE: AUTHENTICATION\nERROR: Cloud Sync is not logged in or disabled.');
+    setSyncStatus('Not Logged In', 'rose');
+    return;
+  }
+
+  // Verify and ensure active session with Supabase
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session || !session.user) {
+      const restored = await restoreUserSession();
+      if (!restored) {
+        console.error('SYNC ERROR\nSTAGE: AUTHENTICATION\nERROR: Session expired and could not be restored.');
+        setSyncStatus('Not Logged In', 'rose');
+        return;
+      }
+    }
+  } catch (authErr) {
+    console.error('SYNC ERROR\nSTAGE: AUTHENTICATION\nERROR:', authErr);
+    setSyncStatus('Auth Error', 'rose');
     return;
   }
 
   syncInProgress = true;
   setSyncStatus('Syncing...', 'amber');
 
-  const syncStart = new Date().toISOString();
   const userId = currentUser.id;
-  console.log(`[Sync] === SYNC START ===`);
-  console.log(`[Sync] User ID: ${userId}`);
-  console.log(`[Sync] Timestamp: ${syncStart}`);
+  console.log('SYNC START');
+  console.log(`[Sync] Enabled: true, User ID: ${userId}`);
 
   try {
     let pushedCount = 0;
     let pulledCount = 0;
 
     const lastSyncTime = await getSetting('cloud_last_sync_time', '');
-    console.log(`[Sync] Last sync time: ${lastSyncTime || '(none - full sync)'}`);
-
     const stores = ['subjects', 'chapters', 'lectures', 'tests', 'weekly_targets', 'study_sessions', 'revisions'];
 
-    // ALWAYS push local pending changes FIRST before pulling
-    // This ensures local completions reach cloud before we pull
-    console.log('[Sync] Phase 1: Pushing local pending changes...');
-    for (const st of stores) {
-      const pushed = await pushStoreChanges(st, userId);
-      pushedCount += pushed;
-      if (pushed > 0) console.log(`[Sync] Pushed ${pushed} records from ${st}`);
+    // 1. PUSH LOCAL PENDING CHANGES
+    try {
+      for (const st of stores) {
+        const pushed = await pushStoreChanges(st, userId);
+        pushedCount += pushed;
+      }
+      console.log(`UPLOAD RESULT: Pushed ${pushedCount} items`);
+    } catch (pushErr) {
+      console.error('SYNC ERROR\nSTAGE: UPLOAD\nERROR:', pushErr);
+      throw pushErr;
     }
-    console.log(`[Sync] Push complete. Total pushed: ${pushedCount}`);
 
-    // Then pull cloud changes (with or without time filter)
-    console.log('[Sync] Phase 2: Pulling cloud changes...');
-    for (const st of stores) {
-      const pulled = await pullStoreChanges(st, userId, lastSyncTime);
-      pulledCount += pulled;
-      if (pulled > 0) console.log(`[Sync] Pulled ${pulled} records for ${st}`);
+    // 2. PULL CLOUD CHANGES
+    try {
+      for (const st of stores) {
+        const pulled = await pullStoreChanges(st, userId, lastSyncTime);
+        pulledCount += pulled;
+      }
+      console.log(`DOWNLOAD RESULT: Pulled ${pulledCount} items`);
+    } catch (pullErr) {
+      console.error('SYNC ERROR\nSTAGE: DOWNLOAD\nERROR:', pullErr);
+      throw pullErr;
     }
-    console.log(`[Sync] Pull complete. Total pulled: ${pulledCount}`);
+
+    // 3. MERGE SUCCESS CONFIRMATION
+    console.log('MERGE RESULT: Successfully merged into IndexedDB');
 
     const nowIso = new Date().toISOString();
     await setSetting('cloud_last_sync_time', nowIso);
@@ -671,21 +892,16 @@ async function syncNow() {
 
     setSyncStatus('Synced', 'emerald');
     await updatePendingCountUI();
-    console.log(`[Sync] === SYNC COMPLETE === Pushed: ${pushedCount}, Pulled: ${pulledCount}`);
+    console.log(`SYNC SUCCESS: Pushed: ${pushedCount}, Pulled: ${pulledCount}`);
     if (pushedCount > 0 || pulledCount > 0) {
       showToast(`Synced! ↑${pushedCount} ↓${pulledCount}`, 'sync');
       refreshCurrentView();
     }
   } catch (err) {
-    console.error('[Sync] SYNC FAILED with error:', err);
-    console.error('[Sync] Error type:', err.constructor ? err.constructor.name : typeof err);
-    console.error('[Sync] Error message:', err.message || String(err));
-    if (err.details) console.error('[Sync] Supabase details:', err.details);
-    if (err.hint) console.error('[Sync] Supabase hint:', err.hint);
-    if (err.code) console.error('[Sync] Supabase code:', err.code);
     const errMsg = err.message || String(err);
-    setSyncStatus(`Sync failed: ${errMsg.slice(0, 40)}`, 'rose');
-    showToast(`Sync failed: ${errMsg.slice(0, 60)}`, 'error');
+    console.error('SYNC ERROR\nSTAGE: GENERAL\nERROR:', errMsg);
+    setSyncStatus(`Sync failed: ${errMsg.slice(0, 35)}`, 'rose');
+    showToast(`Sync failed: ${errMsg.slice(0, 50)}`, 'error');
   } finally {
     syncInProgress = false;
   }
@@ -696,12 +912,15 @@ async function pushStoreChanges(storeName, userId) {
   if (pendingItems.length === 0) return 0;
 
   console.log(`[Sync] Pushing ${pendingItems.length} pending items for ${storeName}`);
+  const nowIso = new Date().toISOString();
 
   // Format payload for Supabase
   const payload = pendingItems.map(item => {
     const cleanItem = { ...item, user_id: userId };
     delete cleanItem.sync_status;
-    // Normalize booleans for lectures / tests
+    cleanItem.updated_at = nowIso;
+
+    // Normalize booleans for lectures / tests / revisions
     if (storeName === 'lectures') {
       cleanItem.is_completed = Boolean(cleanItem.is_completed);
       cleanItem.is_dpp_completed = Boolean(cleanItem.is_dpp_completed);
@@ -709,11 +928,12 @@ async function pushStoreChanges(storeName, userId) {
       cleanItem.revision2_done = Boolean(cleanItem.revision2_done);
       cleanItem.is_backlog = Boolean(cleanItem.is_backlog);
       cleanItem.is_archived = Boolean(cleanItem.is_archived);
-      // Ensure updated_at is present and is a valid ISO timestamp
-      if (!cleanItem.updated_at) {
-        cleanItem.updated_at = new Date().toISOString();
-      }
-      console.log(`[Sync] → Lecture ${cleanItem.lecture_no} (${cleanItem.client_id}): completed=${cleanItem.is_completed}, dpp=${cleanItem.is_dpp_completed}, updated_at=${cleanItem.updated_at}`);
+      console.log(`[Sync] -> Lecture ${cleanItem.lecture_no} (${cleanItem.client_id}): completed=${cleanItem.is_completed}, dpp=${cleanItem.is_dpp_completed}`);
+    } else if (storeName === 'study_sessions') {
+      cleanItem.duration_minutes = Number(cleanItem.duration_minutes) || 0;
+      cleanItem.duration_hours = Number(cleanItem.duration_hours) || 0;
+    } else if (storeName === 'revisions') {
+      cleanItem.is_completed = Boolean(cleanItem.is_completed);
     }
     return cleanItem;
   });
@@ -724,11 +944,9 @@ async function pushStoreChanges(storeName, userId) {
     const { data, error } = await supabaseClient.from(storeName).upsert(chunk, { onConflict: 'user_id,client_id' });
     if (error) {
       console.error(`[Sync] UPSERT FAILED for ${storeName}:`, error);
-      console.error(`[Sync] Error code: ${error.code}, message: ${error.message}`);
-      if (error.details) console.error(`[Sync] Details: ${error.details}`);
       throw error;
     }
-    console.log(`[Sync] ✓ Upserted chunk ${i/50 + 1} for ${storeName} (${chunk.length} records)`);
+    console.log(`[Sync] [OK] Upserted chunk ${i/50 + 1} for ${storeName} (${chunk.length} records)`);
   }
 
   // Mark local items as synced ONLY after successful cloud confirmation
@@ -743,11 +961,18 @@ async function pullStoreChanges(storeName, userId, lastSyncTime) {
   let from = 0;
   const pageSize = 1000;
 
+  // 1-minute safety window against device clock skew
+  let bufferedTime = null;
+  if (lastSyncTime) {
+    const bufferMs = 60 * 1000;
+    bufferedTime = new Date(new Date(lastSyncTime).getTime() - bufferMs).toISOString();
+  }
+
   // Range pagination to fetch all rows reliably
   while (true) {
     let query = supabaseClient.from(storeName).select('*').eq('user_id', userId);
-    if (lastSyncTime) {
-      query = query.gt('updated_at', lastSyncTime);
+    if (bufferedTime) {
+      query = query.gt('updated_at', bufferedTime);
     }
     query = query.range(from, from + pageSize - 1);
 
@@ -761,6 +986,7 @@ async function pullStoreChanges(storeName, userId, lastSyncTime) {
     if (data.length < pageSize) break;
     from += pageSize;
   }
+
 
   if (allCloudRows.length === 0) return 0;
 

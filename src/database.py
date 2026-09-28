@@ -41,6 +41,100 @@ def format_minutes_str(mins: float) -> str:
 
 DEFAULT_APP_DATA_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'Aayush360')
 
+CANONICAL_CHAPTERS = [
+    ('subj_physical_chemistry', 1, 'Basic Chemistry', 'bb39ff04-acce-4170-a754-ba012e9a3715', 8),
+    ('subj_physical_chemistry', 2, 'Redox Reaction', 'bd35e259-2933-4572-b800-bf84e47a2259', 7),
+    ('subj_physical_chemistry', 3, 'Structure Of Atom', '91c37551-aac0-43a3-9e6b-912ccf14143c', 10),
+    ('subj_physical_chemistry', 4, 'Solution', '501cfb58-52f4-446b-8179-55decd6de5d8', 8),
+    ('subj_physical_chemistry', 5, 'Chemical Kinetics', '1a3a5dca-0915-4875-bd42-662fccd44941', 6),
+    ('subj_physical_chemistry', 6, 'Thermodynamics', '99c04d83-dd61-422e-aa79-1f5a3dda6d03', 9),
+    ('subj_physical_chemistry', 7, 'Chemical Equilibrium', 'a3528f1a-cfb9-4cab-a068-ad57f7fbffb6', 6),
+    ('subj_physical_chemistry', 8, 'Ionic Equilibrium', 'e1d9e872-8392-4912-86ae-c72b02b5480a', 6),
+    ('subj_physical_chemistry', 9, 'Electrochemistry', '1dda9187-6125-4a85-a671-15014d9d8c75', 8),
+    ('subj_physics', 1, 'Mathematical Tools', 'f4542dfc-a69f-44f6-8079-7d7716352927', 0),
+    ('subj_physics', 2, 'Error in Measurements', 'fae69e26-e707-4e86-b57f-983602806918', 0),
+    ('subj_physics', 3, 'Motion in a Straight Line', '70de62eb-ddad-4089-b1da-17a98f6fb9f3', 0),
+    ('subj_physics', 4, 'Motion in a Plane', '4f8fbf74-acb4-429a-81a6-d56d930bc0ec', 0),
+    ('subj_physics', 5, 'Relative Motion', '46c09536-53ea-467b-a0c5-f3ff566f5749', 0),
+    ('subj_physics', 6, 'Laws of Motion', '670755b0-a90d-4ee9-9cde-bea2d6adc86e', 0),
+    ('subj_physics', 7, 'Work, Energy and Power', 'dbb30083-c07f-49d4-af4c-8bb7da7e3bd4', 0),
+    ('subj_physics', 8, 'Circular Motion', 'bc4c89af-4bd1-4615-b4a5-f0405e2dfdf3', 0),
+    ('subj_physics', 9, 'Centre of Mass & System of Particles', '438c7c5b-d5f9-4d72-af50-b57886af0693', 0),
+    ('subj_physics', 10, 'Rotational Motion', '44611378-7b4e-4e02-97f2-e46e01d768a0', 0),
+    ('subj_physics', 11, 'Oscillations', '06ed726f-9e02-45b2-90a7-b185cdaec5cb', 0),
+    ('subj_physics', 12, 'Ray Optics and Optical Instruments', '3cac1193-b94d-4c8c-a901-3449a583982a', 0),
+    ('subj_physics', 13, 'Dual Nature of Radiation and Matter', 'caac3d29-2ab9-4b80-ac49-ac5698d3aefd', 0),
+    ('subj_physics', 14, 'Atoms', '9e04f788-2a66-4188-9602-263b6b0fbfb0', 0),
+    ('subj_physics', 15, 'Nuclei', '49a3d86b-c826-4812-89df-dab7da5962e9', 0),
+    ('subj_physics', 16, 'Thermal Properties of Matter', 'f6e62ffc-0d0e-41c8-bc38-e1acd9ab5594', 0),
+    ('subj_physics', 17, 'Kinetic Theory', 'b9304d34-4d85-41a5-a4e3-1481e0a20642', 0),
+    ('subj_physics', 18, 'Thermodynamics', 'df58b655-b679-4d35-a8a0-6f0e5db71e12', 0),
+    ('subj_physics', 19, 'Mechanical Properties of Solids', '56a5def1-8409-452a-bc3b-fa1e9a73da62', 0),
+    ('subj_physics', 20, 'Mechanical Properties of Fluids', '4877ed94-25f5-413c-8e61-53f3f02b58ce', 0),
+    ('subj_physics', 21, 'Electric Charges and Fields & Potential', 'a044390b-3f03-410a-867f-58a710246ea6', 0),
+    ('subj_physics', 22, 'Gravitation', 'b6b6edf5-b6df-490d-ac69-1e406282cd3d', 0),
+    ('subj_physics', 23, 'Current Electricity', 'af73a4ec-6af1-4b69-95cb-c2bd44675f23', 0),
+    ('subj_physics', 24, 'Electrostatic Potential and Capacitance', '095a1f32-0616-4e37-aadd-3a572c7f8d8e', 0),
+    ('subj_physics', 25, 'Moving Charges and Magnetism', 'fd8cfee0-2980-4cfc-ae5e-78c9d086707f', 0),
+    ('subj_physics', 26, 'Magnetism and Matter', 'f7e7c4bd-f8b7-45cc-8e0f-8fd701ce3d36', 0),
+    ('subj_physics', 27, 'Electromagnetic Induction', '73e8c1ac-42df-4a01-84db-9ac7a4cf439a', 0),
+    ('subj_physics', 28, 'Alternating Current', '6f1ef929-6a9e-4785-863c-ed911af5f773', 0),
+    ('subj_physics', 29, 'Waves', '75539eae-8330-4ee5-9098-3dd9edf9ca76', 0),
+    ('subj_physics', 30, 'Electromagnetic Waves', 'a07242a7-f3f5-47c9-99ff-494633b550e1', 0),
+    ('subj_physics', 31, 'Wave Optics', '933a9143-9621-4f8a-9d0b-fcd5a7e8d178', 0),
+    ('subj_physics', 32, 'Semiconductor Electronics', '09523d43-3e26-44ce-90e9-55402632121b', 0),
+    ('subj_physics', 33, 'Units and Measurements', '9705e838-f325-44d0-8fd1-089d5a4f32a2', 0),
+    ('subj_inorganic_chemistry', 1, 'Classification of Elements and Periodicity in Properties', 'e6330d0e-3d7e-4307-8012-934be715bd6d', 0),
+    ('subj_inorganic_chemistry', 2, 'Chemical Bonding and Molecular Structure', '8d34dfee-9b3b-4636-aa46-32f00020e409', 0),
+    ('subj_inorganic_chemistry', 3, 'Coordination Compounds', 'fb7ba985-db07-4b54-b158-8653a79525ce', 0),
+    ('subj_inorganic_chemistry', 4, 'P-block Elements', 'cae9f7f3-88bf-4adb-9414-e9944feda27e', 0),
+    ('subj_inorganic_chemistry', 5, 'The d and f-Block Elements', '6d9552a0-7614-4f46-b3b0-42978d4411b9', 0),
+    ('subj_inorganic_chemistry', 6, 'Principles of Qualitative Analysis', 'f8c6033a-2156-4672-985e-4e71b4e3df31', 0),
+    ('subj_inorganic_chemistry', 7, 'Inorganic Chemistry', '6f4e296a-00ec-49bc-98a0-6950b6f07c71', 0),
+    ('subj_inorganic_chemistry', 8, 'Hydrogen and its Compounds', 'ddc53001-dbb3-4f24-b539-bb3b1d62a026', 0),
+    ('subj_inorganic_chemistry', 9, 'S-block Elements', 'd94f7b36-c350-4d04-9664-8643f1b8c3b3', 0),
+    ('subj_organic_chemistry', 1, 'IUPAC Nomenclature', '00f017c7-d2e0-4456-8efd-6f827b2ef434', 0),
+    ('subj_organic_chemistry', 2, 'General Organic Chemistry (GOC)', '33870278-5872-4465-822f-fc10eb9cb862', 0),
+    ('subj_organic_chemistry', 3, 'Some Basic Principles and Techniques: Isomerism', '841fbf10-41c9-41b6-9d5e-4fe9ef0aab76', 0),
+    ('subj_organic_chemistry', 4, 'Hydrocarbons', 'b752e9a3-7f2d-405b-8157-cc5e2da4c864', 0),
+    ('subj_organic_chemistry', 5, 'Haloalkanes and Haloarenes', '01ac274c-2e8d-4334-bc85-d66b70c85293', 0),
+    ('subj_organic_chemistry', 6, 'Alcohols, Phenols and Ethers', 'ca7c5948-f014-48cb-ae3b-e46de0ad5fc3', 0),
+    ('subj_organic_chemistry', 7, 'Aldehydes, Ketones and Carboxylic Acids', '331b1a2b-a25e-4c31-98db-60a8367aee8c', 0),
+    ('subj_organic_chemistry', 8, 'Amines', 'b299996b-1e48-4ee2-8670-c9d663b0a966', 0),
+    ('subj_organic_chemistry', 9, 'Biomolecules', '02803bfe-649d-49c4-bfb0-da623908ad0d', 0),
+    ('subj_organic_chemistry', 10, 'Polymers', 'c31a77fe-a550-4a1b-a140-06642d0906dc', 0),
+    ('subj_organic_chemistry', 11, 'Chemistry in Everyday Life', '3f9cc356-63bf-40b8-b843-067a40df3417', 0),
+    ('subj_organic_chemistry', 12, 'Environmental Chemistry', '8257d8b1-e2bd-439e-81c6-f44c3146abea', 0),
+    ('subj_mathematics', 1, 'Basic Math', '0a857405-d74b-4209-ad91-ba0c04a27d36', 0),
+    ('subj_mathematics', 2, 'Quadratic Equations', '663bf406-00d7-45cb-8cf7-7999747067cf', 0),
+    ('subj_mathematics', 3, 'Sequence and Series', '07a08dde-900b-4054-9aa5-f789387866b3', 0),
+    ('subj_mathematics', 4, 'Permutations and Combinations', '34e1552c-e293-44e0-ae2c-37c1d88dbe73', 0),
+    ('subj_mathematics', 5, 'Binomial Theorem', '03349e2b-9864-4bdc-8efd-0f2cae5009e9', 0),
+    ('subj_mathematics', 6, 'Straight Lines', 'b0863610-26d9-40d2-ac8a-762fea1510ff', 0),
+    ('subj_mathematics', 7, 'Circles', '94a7f5cd-244e-4d10-b6b1-b0de90b41e50', 0),
+    ('subj_mathematics', 8, 'Conic Sections: Parabola, Ellipse', 'e1734f20-e526-444b-8e8e-af8acc6ebdab', 0),
+    ('subj_mathematics', 9, 'Conic Sections: Hyperbola', '2d8b4ec6-a3a1-448d-8005-d4079bd71649', 0),
+    ('subj_mathematics', 10, 'Complex Numbers', '9dc18146-d7d4-4621-881d-9b98d86388f6', 0),
+    ('subj_mathematics', 11, 'Statistics', 'a3eeb24d-ed24-432d-a4fb-3aaed08713f2', 0),
+    ('subj_mathematics', 12, 'Trigonometric Functions', '69d11828-9461-4fc2-9c42-5d05e45e1a79', 0),
+    ('subj_mathematics', 13, 'Trigonometric Equation', '7a4020fb-ef96-49b7-8633-e1056a0c8a13', 0),
+    ('subj_mathematics', 14, 'Solutions of Triangle', '2b0c4589-0dd9-410b-b931-b6a07900be9a', 0),
+    ('subj_mathematics', 15, 'Determinants & Matrices', 'f69753fe-2436-492a-9389-5e87069ba15e', 0),
+    ('subj_mathematics', 16, 'Vector Algebra', '154fb0e5-648b-47ed-a035-051c49412fc0', 0),
+    ('subj_mathematics', 17, 'Three Dimensional Geometry', 'fcd40c6a-7911-4540-8d21-0c75988ac378', 0),
+    ('subj_mathematics', 18, 'Sets & Relations', 'd1256211-1d01-4e62-8b72-310b3417916f', 0),
+    ('subj_mathematics', 19, 'Functions', 'c3150319-8914-4226-9eab-ae4b0ccd4df2', 0),
+    ('subj_mathematics', 20, 'Inverse Trigonometric Functions', '186f0a1b-5378-4e07-96f7-01d6c8884fad', 0),
+    ('subj_mathematics', 21, 'Limit, Continuity and Differentiability', '27782671-fa31-4663-8b88-e4293236fe29', 0),
+    ('subj_mathematics', 22, 'Method of Differentiation', '304b6c47-ae6d-4c5e-bf7f-9a7dc7108050', 0),
+    ('subj_mathematics', 23, 'Application of Derivatives', '5af25a21-f693-4f36-95ab-611b5bfc0141', 0),
+    ('subj_mathematics', 24, 'Definite Integration', 'd2fcd841-48a4-4226-97be-899bc224e5fe', 0),
+    ('subj_mathematics', 25, 'Indefinite Integration', '362dd631-d534-4cdb-b317-090ddf5c0290', 0),
+    ('subj_mathematics', 26, 'Application of Integrals', 'dc2ad78c-b552-4a22-9ec4-f4c52c792103', 0),
+    ('subj_mathematics', 27, 'Differential Equations', '3db0818f-8bc5-493a-bbe2-d07f4537412d', 0),
+    ('subj_mathematics', 28, 'Probability', '741e56fa-346b-468f-a27a-fd8b7ca09ba7', 0),
+]
+
 class DatabaseManager:
     def __init__(self, db_dir: Optional[str] = None):
         self.base_dir = db_dir or DEFAULT_APP_DATA_DIR
@@ -52,6 +146,7 @@ class DatabaseManager:
         
         self._init_db()
         self.ensure_sync_columns()
+        self.migrate_chapter_sequence_numbers()
         self.create_automatic_backup()
 
     def get_connection(self) -> sqlite3.Connection:
@@ -1380,16 +1475,26 @@ class DatabaseManager:
         c = conn.cursor()
         
         subj_id = data['subject_id']
+        subj = c.execute("SELECT target_type, client_id FROM subjects WHERE id = ?;", (subj_id,)).fetchone()
+        if subj and subj['target_type'] == 'hours':
+            conn.close()
+            return {'success': False, 'error': 'Physical Chemistry is hour-based and does not accept lecture records.'}
+
         chap_id = data.get('chapter_id')
         if not chap_id:
             chap_name = data.get('chapter_name', 'General')
-            c.execute("SELECT id FROM chapters WHERE subject_id = ? AND name = ?;", (subj_id, chap_name))
+            c.execute("SELECT id, client_id FROM chapters WHERE subject_id = ? AND name = ?;", (subj_id, chap_name))
             r = c.fetchone()
             if r:
                 chap_id = r['id']
+                chap_cid = r['client_id']
             else:
-                c.execute("INSERT INTO chapters (subject_id, name) VALUES (?, ?);", (subj_id, chap_name))
+                chap_cid = str(uuid.uuid4())
+                c.execute("INSERT INTO chapters (subject_id, name, client_id, subject_client_id) VALUES (?, ?, ?, ?);", (subj_id, chap_name, chap_cid, subj['client_id'] if subj else ''))
                 chap_id = c.lastrowid
+        else:
+            r = c.execute("SELECT client_id FROM chapters WHERE id = ?;", (chap_id,)).fetchone()
+            chap_cid = r['client_id'] if r else str(uuid.uuid4())
 
         lec_no = int(data.get('lecture_no', 1))
         
@@ -1398,8 +1503,9 @@ class DatabaseManager:
             UPDATE lectures
             SET lecture_no = lecture_no + 1,
                 dpp_no = dpp_no + 1,
+                sync_status = 'pending',
                 updated_at = datetime('now', 'localtime')
-            WHERE chapter_id = ? AND lecture_no >= ? AND is_archived = 0;
+            WHERE chapter_id = ? AND lecture_no >= ? AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');
             """, (chap_id, lec_no))
 
         lec_name = data.get('lecture_name') or f"Lecture {lec_no}"
@@ -1412,12 +1518,15 @@ class DatabaseManager:
         is_comp = 1 if data.get('is_completed') else 0
         comp_at = data.get('completed_at') if is_comp else None
         
+        lec_cid = str(uuid.uuid4())
+        subj_cid = subj['client_id'] if subj else ''
         c.execute("""
         INSERT INTO lectures (
+            client_id, subject_client_id, chapter_client_id, sync_status,
             subject_id, chapter_id, batch, lecture_no, lecture_name, topic,
             dpp_no, resource, scheduled_date, notes, is_completed, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """, (subj_id, chap_id, batch, lec_no, lec_name, topic, dpp_no, resource, sched_date, notes, is_comp, comp_at))
+        ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """, (lec_cid, subj_cid, chap_cid, subj_id, chap_id, batch, lec_no, lec_name, topic, dpp_no, resource, sched_date, notes, is_comp, comp_at))
         
         new_id = c.lastrowid
         conn.commit()
@@ -1429,14 +1538,23 @@ class DatabaseManager:
         c = conn.cursor()
         try:
             subj_id = int(data['subject_id'])
+            subj = c.execute("SELECT target_type, client_id FROM subjects WHERE id = ?;", (subj_id,)).fetchone()
+            if subj and subj['target_type'] == 'hours':
+                conn.close()
+                return {'success': False, 'error': 'Physical Chemistry is hour-based and does not accept DPP records.'}
+
             chap_id = int(data['chapter_id'])
+            chap_row = c.execute("SELECT client_id FROM chapters WHERE id = ?;", (chap_id,)).fetchone()
+            chap_cid = chap_row['client_id'] if chap_row else str(uuid.uuid4())
+            subj_cid = subj['client_id'] if subj else ''
+
             dpp_no = int(data.get('dpp_no', 1))
             dpp_title = data.get('dpp_title') or f"DPP {dpp_no}"
             sched_date = data.get('scheduled_date', datetime.date.today().isoformat())
             notes = data.get('notes', '')
 
             # Check if there is already a lecture row with this chapter_id and dpp_no
-            c.execute("SELECT id, topic, notes, lecture_name FROM lectures WHERE chapter_id = ? AND dpp_no = ? AND is_archived = 0;", (chap_id, dpp_no))
+            c.execute("SELECT id, topic, notes, lecture_name FROM lectures WHERE chapter_id = ? AND dpp_no = ? AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');", (chap_id, dpp_no))
             row = c.fetchone()
             if row:
                 c.execute("""
@@ -1444,19 +1562,22 @@ class DatabaseManager:
                 SET topic = CASE WHEN topic = '' OR topic IS NULL THEN ? ELSE topic END,
                     notes = CASE WHEN ? != '' THEN ? ELSE notes END,
                     scheduled_date = CASE WHEN scheduled_date = '' OR scheduled_date IS NULL THEN ? ELSE scheduled_date END,
+                    sync_status = 'pending',
                     updated_at = datetime('now', 'localtime')
                 WHERE id = ?;
                 """, (dpp_title, notes, notes, sched_date, row['id']))
                 new_id = row['id']
             else:
-                c.execute("SELECT COALESCE(MAX(lecture_no), 0) + 1 FROM lectures WHERE chapter_id = ? AND is_archived = 0;", (chap_id,))
+                c.execute("SELECT COALESCE(MAX(lecture_no), 0) + 1 FROM lectures WHERE chapter_id = ? AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');", (chap_id,))
                 next_lec_no = c.fetchone()[0]
+                lec_cid = str(uuid.uuid4())
                 c.execute("""
                 INSERT INTO lectures (
+                    client_id, subject_client_id, chapter_client_id, sync_status,
                     subject_id, chapter_id, lecture_no, lecture_name, topic,
                     dpp_no, scheduled_date, notes, is_completed, is_dpp_completed
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0);
-                """, (subj_id, chap_id, next_lec_no, dpp_title, dpp_title, dpp_no, sched_date, notes))
+                ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, 0, 0);
+                """, (lec_cid, subj_cid, chap_cid, subj_id, chap_id, next_lec_no, dpp_title, dpp_title, dpp_no, sched_date, notes))
                 new_id = c.lastrowid
 
             conn.commit()
@@ -1639,8 +1760,9 @@ class DatabaseManager:
             UPDATE lectures
             SET lecture_no = lecture_no - 1,
                 dpp_no = dpp_no - 1,
+                sync_status = 'pending',
                 updated_at = datetime('now', 'localtime')
-            WHERE chapter_id = ? AND lecture_no > ? AND is_archived = 0;
+            WHERE chapter_id = ? AND lecture_no > ? AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');
             """, (chap_id, lec_no))
 
         conn.commit()
@@ -1891,6 +2013,7 @@ class DatabaseManager:
         JOIN subjects s ON l.subject_id = s.id
         JOIN chapters c ON l.chapter_id = c.id
         WHERE (l.scheduled_date = ? OR l.rescheduled_date = ?) AND l.is_archived = 0
+          AND (l.deleted_at IS NULL OR l.deleted_at = '')
         ORDER BY s.sort_order, l.lecture_no;
         """, (today, today)).fetchall()
         
@@ -1904,23 +2027,24 @@ class DatabaseManager:
         live_hrs = round(live_mins / 60.0, 2)
 
         # Study sessions hours (Actual study time from Pomodoro if synced)
-        pomodoro_today = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ?;", (today,)).fetchone()[0]
+        pomodoro_today = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ? AND (deleted_at IS NULL OR deleted_at = '');", (today,)).fetchone()[0]
         today_pomodoro_hours = round((pomodoro_today or 0.0) + live_hrs, 2)
 
         current_dt = datetime.date.fromisoformat(today)
         start_of_week = (current_dt - datetime.timedelta(days=current_dt.weekday())).isoformat()
         end_of_week = (current_dt + datetime.timedelta(days=6 - current_dt.weekday())).isoformat()
-        pomodoro_week = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ?;", (start_of_week, end_of_week)).fetchone()[0]
+        pomodoro_week = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ? AND (deleted_at IS NULL OR deleted_at = '');", (start_of_week, end_of_week)).fetchone()[0]
         week_pomodoro_hours = round((pomodoro_week or 0.0) + live_hrs, 2)
 
         start_of_month = f"{current_dt.year:04d}-{current_dt.month:02d}-01"
-        pomodoro_month = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ?;", (start_of_month,)).fetchone()[0]
+        pomodoro_month = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND (deleted_at IS NULL OR deleted_at = '');", (start_of_month,)).fetchone()[0]
         month_pomodoro_hours = round((pomodoro_month or 0.0) + live_hrs, 2)
 
         # Physical Chem study hours: actual hours from external Pomodoro study_sessions ONLY!
         p_today = c.execute("""
         SELECT SUM(duration_hours) FROM study_sessions
-        WHERE (subject LIKE '%Physical%' OR subject = 'Physical Chemistry') AND date = ?;
+        WHERE (subject LIKE '%Physical%' OR subject = 'Physical Chemistry') AND date = ?
+          AND (deleted_at IS NULL OR deleted_at = '');
         """, (today,)).fetchone()[0]
         today_pc_hours = round(p_today, 2) if p_today else 0.0
 
@@ -1939,6 +2063,7 @@ class DatabaseManager:
                 done = c.execute("""
                 SELECT COUNT(*) FROM lectures
                 WHERE subject_id = ? AND is_completed = 1 AND is_archived = 0
+                  AND (deleted_at IS NULL OR deleted_at = '')
                   AND ((completed_at >= ? AND completed_at <= ?) OR (scheduled_date >= ? AND scheduled_date <= ?));
                 """, (s['id'], start_of_week, end_of_week, start_of_week, end_of_week)).fetchone()[0]
                 current_val = done
@@ -1947,7 +2072,8 @@ class DatabaseManager:
                 p_hrs = c.execute("""
                 SELECT SUM(duration_hours) FROM study_sessions
                 WHERE (subject LIKE '%Physical%' OR subject = 'Physical Chemistry')
-                  AND date >= ? AND date <= ?;
+                  AND date >= ? AND date <= ?
+                  AND (deleted_at IS NULL OR deleted_at = '');
                 """, (start_of_week, end_of_week)).fetchone()[0]
                 current_val = round(p_hrs, 1) if p_hrs else 0.0
 
@@ -1965,19 +2091,20 @@ class DatabaseManager:
         upcoming_test = c.execute("""
         SELECT *, julianday(test_date) - julianday(?) as days_left
         FROM tests
-        WHERE test_date >= ?
+        WHERE test_date >= ? AND (deleted_at IS NULL OR deleted_at = '')
         ORDER BY test_date ASC LIMIT 1;
         """, (today, today)).fetchone()
 
-        total_all_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE is_archived = 0;").fetchone()[0]
-        completed_all_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE is_completed = 1 AND is_archived = 0;").fetchone()[0]
-        completed_all_dpps = c.execute("SELECT COUNT(*) FROM lectures WHERE is_dpp_completed = 1 AND is_archived = 0;").fetchone()[0]
+        total_all_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');").fetchone()[0]
+        completed_all_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE is_completed = 1 AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');").fetchone()[0]
+        completed_all_dpps = c.execute("SELECT COUNT(*) FROM lectures WHERE is_dpp_completed = 1 AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');").fetchone()[0]
         backlog_count = c.execute("""
         SELECT COUNT(*) FROM lectures
-        WHERE scheduled_date < ? AND is_completed = 0 AND is_archived = 0;
+        WHERE scheduled_date < ? AND is_completed = 0 AND is_archived = 0
+          AND (deleted_at IS NULL OR deleted_at = '');
         """, (today,)).fetchone()[0]
 
-        has_pomodoro = c.execute("SELECT COUNT(*) FROM study_sessions;").fetchone()[0] > 0
+        has_pomodoro = c.execute("SELECT COUNT(*) FROM study_sessions WHERE (deleted_at IS NULL OR deleted_at = '');").fetchone()[0] > 0
 
         conn.close()
         return {
@@ -2026,6 +2153,7 @@ class DatabaseManager:
         JOIN subjects s ON l.subject_id = s.id
         JOIN chapters c ON l.chapter_id = c.id
         WHERE l.is_archived = 0
+          AND (l.deleted_at IS NULL OR l.deleted_at = '')
         """
         params = []
         
@@ -2087,7 +2215,7 @@ class DatabaseManager:
                 SELECT c.*,
                        COALESCE(c.target_hours, 0) as total_hours
                 FROM chapters c
-                WHERE c.subject_id = ?
+                WHERE c.subject_id = ? AND (c.deleted_at IS NULL OR c.deleted_at = '')
                 ORDER BY c.sequence_no ASC, c.id ASC;
                 """, (s['id'],)).fetchall()
 
@@ -2096,9 +2224,10 @@ class DatabaseManager:
                     ch_dict = dict(ch)
                     tot = int(ch_dict.get('target_hours') or 0)
                     comp = c.execute("""
-                        SELECT COUNT(*) FROM study_sessions
+                        SELECT COUNT(DISTINCT topic) FROM study_sessions
                         WHERE (subject LIKE '%Physical%' OR subject = 'Physical Chemistry')
                           AND chapter = ?
+                          AND topic LIKE 'Hour %'
                           AND (deleted_at IS NULL OR deleted_at = '')
                     """, (ch_dict['name'],)).fetchone()[0] or 0
                     ch_dict['total_lectures'] = tot
@@ -2118,8 +2247,8 @@ class DatabaseManager:
                        SUM(CASE WHEN l.revision1_done = 1 THEN 1 ELSE 0 END) as rev1_count,
                        SUM(CASE WHEN l.revision2_done = 1 THEN 1 ELSE 0 END) as rev2_count
                 FROM chapters c
-                LEFT JOIN lectures l ON c.id = l.chapter_id AND l.is_archived = 0
-                WHERE c.subject_id = ?
+                LEFT JOIN lectures l ON c.id = l.chapter_id AND l.is_archived = 0 AND (l.deleted_at IS NULL OR l.deleted_at = '')
+                WHERE c.subject_id = ? AND (c.deleted_at IS NULL OR c.deleted_at = '')
                 GROUP BY c.id
                 ORDER BY c.sequence_no ASC, c.id ASC;
                 """, (s['id'],)).fetchall()
@@ -2137,8 +2266,15 @@ class DatabaseManager:
         conn.close()
         return subjects
 
-    def get_chapter_hours(self, chapter_id: int) -> Dict[str, Any]:
+    def get_chapter_hours(self, chapter_id: Any) -> Dict[str, Any]:
         """Returns completed hour indices and target hours for a Physical Chemistry chapter."""
+        if isinstance(chapter_id, dict):
+            chapter_id = chapter_id.get('chapter_id', chapter_id.get('id'))
+        try:
+            chapter_id = int(chapter_id)
+        except (ValueError, TypeError):
+            return {'success': False, 'error': 'Invalid chapter ID'}
+
         conn = self.get_connection()
         c = conn.cursor()
         ch = c.execute("SELECT id, name, target_hours, client_id, subject_id FROM chapters WHERE id = ?;", (chapter_id,)).fetchone()
@@ -2174,8 +2310,17 @@ class DatabaseManager:
             'total_completed': len(completed_set)
         }
 
-    def toggle_chapter_hour(self, chapter_id: int, hour_no: int) -> Dict[str, Any]:
+    def toggle_chapter_hour(self, chapter_id: Any, hour_no: Any = None) -> Dict[str, Any]:
         """Toggles an individual hour completion checkbox for a Physical Chemistry chapter."""
+        if isinstance(chapter_id, dict):
+            hour_no = chapter_id.get('hour_no', hour_no)
+            chapter_id = chapter_id.get('chapter_id', chapter_id.get('id'))
+        try:
+            chapter_id = int(chapter_id)
+            hour_no = int(hour_no)
+        except (ValueError, TypeError):
+            return {'success': False, 'error': 'Invalid chapter or hour parameter'}
+
         conn = self.get_connection()
         c = conn.cursor()
         ch = c.execute("SELECT id, name, target_hours, client_id, subject_client_id FROM chapters WHERE id = ?;", (chapter_id,)).fetchone()
@@ -2485,32 +2630,36 @@ class DatabaseManager:
         end_of_month = f"{today.year:04d}-{today.month:02d}-31"
 
         # 1. LECTURE ANALYTICS
-        total_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE is_archived = 0;").fetchone()[0] or 0
-        comp_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE is_completed = 1 AND is_archived = 0;").fetchone()[0] or 0
+        total_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');").fetchone()[0] or 0
+        comp_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE is_completed = 1 AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');").fetchone()[0] or 0
         pending_lecs = total_lecs - comp_lecs
         lec_pct = round((comp_lecs / total_lecs) * 100, 1) if total_lecs > 0 else 0.0
 
         comp_today = c.execute("""
         SELECT COUNT(*) FROM lectures
         WHERE is_completed = 1 AND is_archived = 0
+          AND (deleted_at IS NULL OR deleted_at = '')
           AND (date(completed_at) = ? OR scheduled_date = ?);
         """, (today_str, today_str)).fetchone()[0] or 0
 
         comp_this_week = c.execute("""
         SELECT COUNT(*) FROM lectures
         WHERE is_completed = 1 AND is_archived = 0
+          AND (deleted_at IS NULL OR deleted_at = '')
           AND ((completed_at >= ? AND completed_at <= ?) OR (scheduled_date >= ? AND scheduled_date <= ?));
         """, (start_of_week, end_of_week, start_of_week, end_of_week)).fetchone()[0] or 0
 
         comp_this_month = c.execute("""
         SELECT COUNT(*) FROM lectures
         WHERE is_completed = 1 AND is_archived = 0
+          AND (deleted_at IS NULL OR deleted_at = '')
           AND ((completed_at >= ? AND completed_at <= ?) OR (scheduled_date >= ? AND scheduled_date <= ?));
         """, (start_of_month, end_of_month, start_of_month, end_of_month)).fetchone()[0] or 0
 
         overdue_lecs = c.execute("""
         SELECT COUNT(*) FROM lectures
-        WHERE scheduled_date < ? AND is_completed = 0 AND is_archived = 0;
+        WHERE scheduled_date < ? AND is_completed = 0 AND is_archived = 0
+          AND (deleted_at IS NULL OR deleted_at = '');
         """, (today_str,)).fetchone()[0] or 0
 
         # Daily completion trend for last 14 days
@@ -2520,37 +2669,42 @@ class DatabaseManager:
             day_comp = c.execute("""
             SELECT COUNT(*) FROM lectures
             WHERE is_completed = 1 AND is_archived = 0
+              AND (deleted_at IS NULL OR deleted_at = '')
               AND (date(completed_at) = ? OR scheduled_date = ?);
             """, (dt, dt)).fetchone()[0] or 0
             daily_completion_trend.append({'date': dt, 'completed': day_comp})
 
         # 2. DPP ANALYTICS
         total_dpps = total_lecs
-        comp_dpps = c.execute("SELECT COUNT(*) FROM lectures WHERE is_dpp_completed = 1 AND is_archived = 0;").fetchone()[0] or 0
+        comp_dpps = c.execute("SELECT COUNT(*) FROM lectures WHERE is_dpp_completed = 1 AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');").fetchone()[0] or 0
         pending_dpps = total_dpps - comp_dpps
         dpp_pct = round((comp_dpps / total_dpps) * 100, 1) if total_dpps > 0 else 0.0
 
         dpp_comp_today = c.execute("""
         SELECT COUNT(*) FROM lectures
         WHERE is_dpp_completed = 1 AND is_archived = 0
+          AND (deleted_at IS NULL OR deleted_at = '')
           AND (date(dpp_completed_at) = ? OR scheduled_date = ?);
         """, (today_str, today_str)).fetchone()[0] or 0
 
         dpp_comp_this_week = c.execute("""
         SELECT COUNT(*) FROM lectures
         WHERE is_dpp_completed = 1 AND is_archived = 0
+          AND (deleted_at IS NULL OR deleted_at = '')
           AND ((dpp_completed_at >= ? AND dpp_completed_at <= ?) OR (scheduled_date >= ? AND scheduled_date <= ?));
         """, (start_of_week, end_of_week, start_of_week, end_of_week)).fetchone()[0] or 0
 
         dpp_comp_this_month = c.execute("""
         SELECT COUNT(*) FROM lectures
         WHERE is_dpp_completed = 1 AND is_archived = 0
+          AND (deleted_at IS NULL OR deleted_at = '')
           AND ((dpp_completed_at >= ? AND dpp_completed_at <= ?) OR (scheduled_date >= ? AND scheduled_date <= ?));
         """, (start_of_month, end_of_month, start_of_month, end_of_month)).fetchone()[0] or 0
 
         dpp_backlog = c.execute("""
         SELECT COUNT(*) FROM lectures
-        WHERE scheduled_date < ? AND is_dpp_completed = 0 AND is_archived = 0;
+        WHERE scheduled_date < ? AND is_dpp_completed = 0 AND is_archived = 0
+          AND (deleted_at IS NULL OR deleted_at = '');
         """, (today_str,)).fetchone()[0] or 0
 
         # Lecture vs DPP gap
@@ -2579,19 +2733,36 @@ class DatabaseManager:
                 achieved = c.execute("""
                 SELECT COUNT(*) FROM lectures
                 WHERE subject_id = ? AND is_completed = 1 AND is_archived = 0
+                  AND (deleted_at IS NULL OR deleted_at = '')
                   AND ((completed_at >= ? AND completed_at <= ?) OR (scheduled_date >= ? AND scheduled_date <= ?));
                 """, (s_id, start_of_week, end_of_week, start_of_week, end_of_week)).fetchone()[0] or 0
                 lecture_target_total += target_val
                 lecture_achieved_total += achieved
+                total_subj_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE subject_id = ? AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');", (s_id,)).fetchone()[0] or 0
+                comp_subj_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE subject_id = ? AND is_completed = 1 AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');", (s_id,)).fetchone()[0] or 0
+                comp_subj_dpps = c.execute("SELECT COUNT(*) FROM lectures WHERE subject_id = ? AND is_dpp_completed = 1 AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');", (s_id,)).fetchone()[0] or 0
+                subj_backlog = c.execute("SELECT COUNT(*) FROM lectures WHERE subject_id = ? AND scheduled_date < ? AND is_completed = 0 AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');", (s_id, today_str)).fetchone()[0] or 0
             else:
                 p_hrs = c.execute("""
                 SELECT SUM(duration_hours) FROM study_sessions
                 WHERE (subject LIKE '%Physical%' OR subject = 'Physical Chemistry')
-                  AND date >= ? AND date <= ?;
+                  AND date >= ? AND date <= ?
+                  AND (deleted_at IS NULL OR deleted_at = '');
                 """, (start_of_week, end_of_week)).fetchone()[0] or 0.0
                 achieved = round(p_hrs, 1)
                 hours_target_total += target_val
                 hours_achieved_total += achieved
+                pchem_target = c.execute("SELECT SUM(target_hours) FROM chapters WHERE subject_id = ? AND (deleted_at IS NULL OR deleted_at = '');", (s_id,)).fetchone()[0] or 68
+                pchem_comp = c.execute("""
+                SELECT COUNT(DISTINCT topic) FROM study_sessions
+                WHERE (subject LIKE '%Physical%' OR subject = 'Physical Chemistry')
+                  AND topic LIKE 'Hour %'
+                  AND (deleted_at IS NULL OR deleted_at = '');
+                """).fetchone()[0] or 0
+                total_subj_lecs = int(pchem_target)
+                comp_subj_lecs = int(pchem_comp)
+                comp_subj_dpps = 0
+                subj_backlog = 0
 
             rem = max(0.0, round(target_val - achieved, 1))
             pct = round((achieved / target_val) * 100, 1) if target_val > 0 else 0.0
@@ -2612,11 +2783,6 @@ class DatabaseManager:
                     diff = int(round(rem)) if t_type == 'lectures' else rem
                     status_label = f"{diff} {s['target_type']} behind"
                     status_color = "rose"
-
-            total_subj_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE subject_id = ? AND is_archived = 0;", (s_id,)).fetchone()[0] or 0
-            comp_subj_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE subject_id = ? AND is_completed = 1 AND is_archived = 0;", (s_id,)).fetchone()[0] or 0
-            comp_subj_dpps = c.execute("SELECT COUNT(*) FROM lectures WHERE subject_id = ? AND is_dpp_completed = 1 AND is_archived = 0;", (s_id,)).fetchone()[0] or 0
-            subj_backlog = c.execute("SELECT COUNT(*) FROM lectures WHERE subject_id = ? AND scheduled_date < ? AND is_completed = 0 AND is_archived = 0;", (s_id, today_str)).fetchone()[0] or 0
 
             subject_cards.append({
                 'id': s_id,
@@ -2649,17 +2815,19 @@ class DatabaseManager:
         monday_dt = datetime.date.fromisoformat(start_of_week)
         for i in range(7):
             d_date = (monday_dt + datetime.timedelta(days=i)).isoformat()
-            planned_count = c.execute("SELECT COUNT(*) FROM lectures WHERE scheduled_date = ? AND is_archived = 0;", (d_date,)).fetchone()[0] or 0
+            planned_count = c.execute("SELECT COUNT(*) FROM lectures WHERE scheduled_date = ? AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');", (d_date,)).fetchone()[0] or 0
             done_count = c.execute("""
             SELECT COUNT(*) FROM lectures
-            WHERE scheduled_date = ? AND is_completed = 1 AND is_archived = 0;
+            WHERE scheduled_date = ? AND is_completed = 1 AND is_archived = 0
+              AND (deleted_at IS NULL OR deleted_at = '');
             """, (d_date,)).fetchone()[0] or 0
             dpp_planned = planned_count
             dpp_done = c.execute("""
             SELECT COUNT(*) FROM lectures
-            WHERE scheduled_date = ? AND is_dpp_completed = 1 AND is_archived = 0;
+            WHERE scheduled_date = ? AND is_dpp_completed = 1 AND is_archived = 0
+              AND (deleted_at IS NULL OR deleted_at = '');
             """, (d_date,)).fetchone()[0] or 0
-            hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ?;", (d_date,)).fetchone()[0] or 0.0
+            hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ? AND (deleted_at IS NULL OR deleted_at = '');", (d_date,)).fetchone()[0] or 0.0
 
             daily_breakdown.append({
                 'day_name': day_names[i],
@@ -2685,6 +2853,7 @@ class DatabaseManager:
             w_done = c.execute("""
             SELECT COUNT(*) FROM lectures
             WHERE is_completed = 1 AND is_archived = 0
+              AND (deleted_at IS NULL OR deleted_at = '')
               AND ((completed_at >= ? AND completed_at <= ?) OR (scheduled_date >= ? AND scheduled_date <= ?));
             """, (w_start, w_end, w_start, w_end)).fetchone()[0] or 0
 
@@ -2703,13 +2872,15 @@ class DatabaseManager:
         for s in subjects:
             count = c.execute("""
             SELECT COUNT(*) FROM lectures
-            WHERE subject_id = ? AND scheduled_date < ? AND is_completed = 0 AND is_archived = 0;
+            WHERE subject_id = ? AND scheduled_date < ? AND is_completed = 0 AND is_archived = 0
+              AND (deleted_at IS NULL OR deleted_at = '');
             """, (s['id'], today_str)).fetchone()[0] or 0
             backlog_by_subj[s['display_name']] = count
 
         oldest_overdue = c.execute("""
         SELECT scheduled_date FROM lectures
         WHERE scheduled_date < ? AND is_completed = 0 AND is_archived = 0
+          AND (deleted_at IS NULL OR deleted_at = '')
         ORDER BY scheduled_date ASC LIMIT 1;
         """, (today_str,)).fetchone()
         oldest_overdue_date = oldest_overdue[0] if oldest_overdue else None
@@ -2719,27 +2890,28 @@ class DatabaseManager:
             ref_date = (today - datetime.timedelta(weeks=w_offset)).isoformat()
             b_cnt = c.execute("""
             SELECT COUNT(*) FROM lectures
-            WHERE scheduled_date < ? AND (is_completed = 0 OR completed_at > ?) AND is_archived = 0;
+            WHERE scheduled_date < ? AND (is_completed = 0 OR completed_at > ?) AND is_archived = 0
+              AND (deleted_at IS NULL OR deleted_at = '');
             """, (ref_date, ref_date)).fetchone()[0] or 0
             w_lbl = f"Week -{w_offset}" if w_offset > 0 else "Current"
             backlog_trend.append({'label': w_lbl, 'date': ref_date, 'count': b_cnt})
 
         # 5. STUDY HOURS & CONSISTENCY (100% Pomodoro only)
-        total_sessions = c.execute("SELECT COUNT(*) FROM study_sessions;").fetchone()[0] or 0
+        total_sessions = c.execute("SELECT COUNT(*) FROM study_sessions WHERE (deleted_at IS NULL OR deleted_at = '');").fetchone()[0] or 0
         has_pomodoro = total_sessions > 0
-        pomo_study_hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions;").fetchone()[0] or 0.0
-        pomo_today_hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ?;", (today_str,)).fetchone()[0] or 0.0
-        pomo_week_hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ?;", (start_of_week, end_of_week)).fetchone()[0] or 0.0
-        pomo_month_hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ?;", (start_of_month, end_of_month)).fetchone()[0] or 0.0
+        pomo_study_hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE (deleted_at IS NULL OR deleted_at = '');").fetchone()[0] or 0.0
+        pomo_today_hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ? AND (deleted_at IS NULL OR deleted_at = '');", (today_str,)).fetchone()[0] or 0.0
+        pomo_week_hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ? AND (deleted_at IS NULL OR deleted_at = '');", (start_of_week, end_of_week)).fetchone()[0] or 0.0
+        pomo_month_hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ? AND (deleted_at IS NULL OR deleted_at = '');", (start_of_month, end_of_month)).fetchone()[0] or 0.0
 
-        studied_dates = [r[0] for r in c.execute("SELECT DISTINCT date FROM study_sessions ORDER BY date ASC;").fetchall()]
+        studied_dates = [r[0] for r in c.execute("SELECT DISTINCT date FROM study_sessions WHERE (deleted_at IS NULL OR deleted_at = '') ORDER BY date ASC;").fetchall()]
         days_studied = len(studied_dates)
         avg_studied_day = round(pomo_study_hrs / days_studied, 1) if days_studied > 0 else 0.0
 
         heatmap_matrix = []
         for d_offset in range(27, -1, -1):
             h_date = (today - datetime.timedelta(days=d_offset)).isoformat()
-            hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ?;", (h_date,)).fetchone()[0] or 0.0
+            hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ? AND (deleted_at IS NULL OR deleted_at = '');", (h_date,)).fetchone()[0] or 0.0
             hrs = round(hrs, 1)
             level = 0
             if hrs > 6.0: level = 4
@@ -2755,7 +2927,7 @@ class DatabaseManager:
             })
 
         # 6. TESTS ANALYTICS
-        tests = [dict(r) for r in c.execute("SELECT * FROM tests ORDER BY test_date ASC;").fetchall()]
+        tests = [dict(r) for r in c.execute("SELECT * FROM tests WHERE (deleted_at IS NULL OR deleted_at = '') ORDER BY test_date ASC;").fetchall()]
         total_tests = len(tests)
         comp_tests = sum(1 for t in tests if t.get('status') == 'completed')
         upcoming_tests = [t for t in tests if t.get('status') == 'upcoming' and t.get('test_date', '') >= today_str]
@@ -3029,6 +3201,108 @@ class DatabaseManager:
         conn.commit()
         conn.close()
 
+    def migrate_chapter_sequence_numbers(self) -> Dict[str, Any]:
+        """
+        Safely assigns canonical sequence_no and client_id across all 5 subjects:
+          - Physics: 1 to 33
+          - Mathematics: 1 to 28
+          - Physical Chemistry: 1 to 9 (with targets 8, 7, 10, 8, 6, 9, 6, 6, 8 hours)
+          - Inorganic Chemistry: 1 to 9
+          - Organic Chemistry: 1 to 12
+        Protection guarantees:
+          - Does not delete or duplicate chapters
+          - Does not delete or duplicate lectures
+          - Does not break chapter/subject relationships
+          - Does not reset or delete completion records or progress
+          - Fully idempotent
+        """
+        canonical_list = None
+        possible_paths = [
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'android_app', 'www', 'seed_data.json'),
+            os.path.join(os.getcwd(), 'android_app', 'www', 'seed_data.json'),
+            r'E:\360\android_app\www\seed_data.json'
+        ]
+        for p in possible_paths:
+            if os.path.exists(p):
+                try:
+                    with open(p, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        if 'chapters' in data and len(data['chapters']) == 91:
+                            canonical_list = [
+                                (c['subject_client_id'], c['sequence_no'], c['name'], c['client_id'], c.get('target_hours', 0))
+                                for c in data['chapters']
+                            ]
+                            break
+                except Exception:
+                    pass
+
+        if not canonical_list:
+            canonical_list = CANONICAL_CHAPTERS
+
+        canonical_by_cid = {item[3]: item for item in canonical_list}
+        canonical_by_subj_name = {(item[0], item[2].strip().lower()): item for item in canonical_list}
+
+        conn = self.get_connection()
+        c = conn.cursor()
+
+        subj_rows = c.execute("SELECT id, name, client_id FROM subjects").fetchall()
+        subj_id_to_cid = {s['id']: s['client_id'] for s in subj_rows}
+
+        chap_rows = c.execute("SELECT id, subject_id, name, sequence_no, client_id, subject_client_id, target_hours FROM chapters").fetchall()
+        updated_count = 0
+
+        for ch in chap_rows:
+            ch_id = ch['id']
+            ch_cid = ch['client_id'] or ''
+            ch_name = (ch['name'] or '').strip()
+            ch_sid = ch['subject_id']
+            ch_subj_cid = ch['subject_client_id'] or subj_id_to_cid.get(ch_sid, '')
+
+            # Match canonical chapter
+            canonical_entry = canonical_by_cid.get(ch_cid)
+            if not canonical_entry:
+                canonical_entry = canonical_by_subj_name.get((ch_subj_cid, ch_name.lower()))
+
+            if canonical_entry:
+                can_subj_cid, can_seq, can_name, can_cid, can_target_hrs = canonical_entry
+                needs_update = False
+                updates = []
+                params = []
+
+                if ch['sequence_no'] != can_seq:
+                    updates.append("sequence_no = ?")
+                    params.append(can_seq)
+                    needs_update = True
+
+                if ch['client_id'] != can_cid:
+                    updates.append("client_id = ?")
+                    params.append(can_cid)
+                    needs_update = True
+
+                if ch['subject_client_id'] != can_subj_cid:
+                    updates.append("subject_client_id = ?")
+                    params.append(can_subj_cid)
+                    needs_update = True
+
+                if can_target_hrs > 0 and (ch['target_hours'] or 0) != can_target_hrs:
+                    updates.append("target_hours = ?")
+                    params.append(can_target_hrs)
+                    needs_update = True
+
+                if needs_update:
+                    params.append(ch_id)
+                    sql = f"UPDATE chapters SET {', '.join(updates)} WHERE id = ?;"
+                    c.execute(sql, params)
+                    updated_count += 1
+
+                    # Keep lecture chapter_client_id & subject_client_id synchronized
+                    if ch['client_id'] != can_cid:
+                        c.execute("UPDATE lectures SET chapter_client_id = ?, subject_client_id = ? WHERE chapter_id = ?;", (can_cid, can_subj_cid, ch_id))
+
+        conn.commit()
+        conn.close()
+        return {'success': True, 'updated': updated_count}
+
     def mark_all_pending_for_sync(self):
         """Marks all local rows as pending so initial sync uploads full data to Supabase."""
         conn = self.get_connection()
@@ -3144,7 +3418,7 @@ class DatabaseManager:
                         print(f"[CloudSync] SKIP merge for lecture {client_id}: local has pending changes (local completed={existing['is_completed']}, cloud completed={is_comp})")
                         continue
                     
-                    print(f"[CloudSync] MERGE lecture {client_id}: completed {existing['is_completed']} → {is_comp}, dpp {existing['is_dpp_completed']} → {is_dpp_comp}")
+                    print(f"[CloudSync] MERGE lecture {client_id}: completed {existing['is_completed']} -> {is_comp}, dpp {existing['is_dpp_completed']} -> {is_dpp_comp}")
                     c.execute("""
                         UPDATE lectures SET
                             subject_id = ?, chapter_id = ?, subject_client_id = ?, chapter_client_id = ?,
@@ -3154,7 +3428,7 @@ class DatabaseManager:
                             questions_practiced = ?, questions_correct = ?, questions_incorrect = ?,
                             accuracy = ?, revision1_done = ?, revision1_date = ?, revision2_done = ?,
                             revision2_date = ?, is_backlog = ?, notes = ?, is_archived = ?,
-                            sync_status = 'synced'
+                            deleted_at = NULL, sync_status = 'synced', updated_at = datetime('now', 'localtime')
                         WHERE client_id = ?
                     """, (
                         subj_id, chap_id, subj_cid, chap_cid,
@@ -3278,32 +3552,39 @@ class DatabaseManager:
             deleted_at = r.get('deleted_at')
             if not client_id:
                 continue
-            existing = c.execute("SELECT id FROM study_sessions WHERE client_id = ?", (client_id,)).fetchone()
+            src = r.get('source', 'Pomodoro')
+            ext_id = r.get('external_session_id')
+            existing = c.execute("""
+                SELECT id FROM study_sessions 
+                WHERE client_id = ? 
+                   OR (external_session_id IS NOT NULL AND external_session_id != '' AND source = ? AND external_session_id = ?)
+            """, (client_id, src, ext_id)).fetchone()
+            
             if existing:
-                if deleted_at:
-                    c.execute("UPDATE study_sessions SET deleted_at = ?, sync_status = 'synced' WHERE client_id = ?", (deleted_at, client_id))
-                else:
-                    c.execute("""
-                        UPDATE study_sessions SET
-                            source = ?, external_session_id = ?, date = ?, start_time = ?, end_time = ?,
-                            duration_minutes = ?, duration_hours = ?, subject = ?, chapter = ?, topic = ?,
-                            activity = ?, notes = ?, sync_status = 'synced'
-                        WHERE client_id = ?
-                    """, (
-                        r.get('source', 'Pomodoro'), r.get('external_session_id'), r.get('date'),
-                        r.get('start_time'), r.get('end_time'), r.get('duration_minutes', 0),
-                        r.get('duration_hours', 0), r.get('subject', ''), r.get('chapter', ''),
-                        r.get('topic', ''), r.get('activity', 'Other'), r.get('notes', ''), client_id
-                    ))
+                c.execute("""
+                    UPDATE study_sessions SET
+                        client_id = ?, source = ?, external_session_id = ?, date = ?, start_time = ?, end_time = ?,
+                        duration_minutes = ?, duration_hours = ?, subject = ?, chapter = ?, topic = ?,
+                        activity = ?, notes = ?, deleted_at = ?, sync_status = 'synced',
+                        updated_at = datetime('now', 'localtime')
+                    WHERE id = ?
+                """, (
+                    client_id, src, ext_id, r.get('date'),
+                    r.get('start_time'), r.get('end_time'), r.get('duration_minutes', 0),
+                    r.get('duration_hours', 0), r.get('subject', ''), r.get('chapter', ''),
+                    r.get('topic', ''), r.get('activity', 'Other'), r.get('notes', ''),
+                    deleted_at, existing['id']
+                ))
             else:
                 if not deleted_at:
                     c.execute("""
                         INSERT INTO study_sessions (
                             client_id, source, external_session_id, date, start_time, end_time,
-                            duration_minutes, duration_hours, subject, chapter, topic, activity, notes, sync_status
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+                            duration_minutes, duration_hours, subject, chapter, topic, activity, notes, sync_status,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', datetime('now', 'localtime'), datetime('now', 'localtime'))
                     """, (
-                        client_id, r.get('source', 'Pomodoro'), r.get('external_session_id'), r.get('date'),
+                        client_id, src, ext_id, r.get('date'),
                         r.get('start_time'), r.get('end_time'), r.get('duration_minutes', 0),
                         r.get('duration_hours', 0), r.get('subject', ''), r.get('chapter', ''),
                         r.get('topic', ''), r.get('activity', 'Other'), r.get('notes', '')

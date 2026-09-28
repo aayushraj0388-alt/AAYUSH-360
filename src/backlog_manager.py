@@ -27,7 +27,8 @@ class BacklogManager:
         UPDATE lectures
         SET is_backlog = 1,
             updated_at = datetime('now', 'localtime')
-        WHERE scheduled_date < ? AND is_completed = 0 AND is_archived = 0 AND is_backlog = 0;
+        WHERE scheduled_date < ? AND is_completed = 0 AND is_archived = 0 
+          AND (deleted_at IS NULL OR deleted_at = '') AND is_backlog = 0;
         """, (today,))
         newly_flagged = c.rowcount
         
@@ -42,7 +43,8 @@ class BacklogManager:
         # Total backlog count
         total_backlog = c.execute("""
         SELECT COUNT(*) FROM lectures
-        WHERE scheduled_date < ? AND is_completed = 0 AND is_archived = 0;
+        WHERE scheduled_date < ? AND is_completed = 0 AND is_archived = 0
+          AND (deleted_at IS NULL OR deleted_at = '');
         """, (today,)).fetchone()[0]
 
         conn.commit()
@@ -70,6 +72,7 @@ class BacklogManager:
         FROM lectures l
         JOIN subjects s ON l.subject_id = s.id
         WHERE l.scheduled_date < ? AND l.is_completed = 0 AND l.is_archived = 0
+          AND (l.deleted_at IS NULL OR l.deleted_at = '')
         ORDER BY s.sort_order, l.scheduled_date ASC, l.lecture_no ASC;
         """, (today_str,)).fetchall()
         
@@ -79,7 +82,7 @@ class BacklogManager:
 
         # 2. Upcoming test blackout dates (day of test and pre-test revision buffer day)
         test_blackout_dates = set()
-        tests = c.execute("SELECT test_date FROM tests WHERE test_date IS NOT NULL AND test_date != ''").fetchall()
+        tests = c.execute("SELECT test_date FROM tests WHERE test_date IS NOT NULL AND test_date != '' AND (deleted_at IS NULL OR deleted_at = '')").fetchall()
         for t in tests:
             t_date_str = t['test_date']
             try:
@@ -100,6 +103,7 @@ class BacklogManager:
         SELECT scheduled_date, subject_id, COUNT(*) as cnt
         FROM lectures
         WHERE scheduled_date >= ? AND is_archived = 0 AND is_completed = 0
+          AND (deleted_at IS NULL OR deleted_at = '')
         GROUP BY scheduled_date, subject_id;
         """, (today_str,)).fetchall()
         
@@ -113,6 +117,7 @@ class BacklogManager:
         SELECT rescheduled_date, subject_id, COUNT(*) as cnt
         FROM lectures
         WHERE rescheduled_date IS NOT NULL AND rescheduled_date >= ? AND is_archived = 0 AND is_completed = 0
+          AND (deleted_at IS NULL OR deleted_at = '')
         GROUP BY rescheduled_date, subject_id;
         """, (today_str,)).fetchall()
         for row in existing_resched:
