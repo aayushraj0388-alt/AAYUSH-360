@@ -395,6 +395,27 @@ class DatabaseManager:
         );
         """)
 
+        # 12. Weekly Target Completions Table (Separates weekly target completion from global syllabus)
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS weekly_target_completions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT UNIQUE NOT NULL,
+            week_start TEXT NOT NULL,
+            lecture_id INTEGER NOT NULL,
+            lecture_client_id TEXT NOT NULL,
+            subject_id INTEGER NOT NULL,
+            subject_client_id TEXT NOT NULL,
+            completed_at TEXT NOT NULL,
+            sync_status TEXT DEFAULT 'pending',
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+            deleted_at TEXT,
+            FOREIGN KEY (lecture_id) REFERENCES lectures (id) ON DELETE CASCADE,
+            FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE CASCADE,
+            UNIQUE(week_start, lecture_id)
+        );
+        """)
+
         # Indexes for ultra-fast queries
         c.execute("CREATE INDEX IF NOT EXISTS idx_lectures_date ON lectures(scheduled_date);")
         c.execute("CREATE INDEX IF NOT EXISTS idx_lectures_subject_chapter ON lectures(subject_id, chapter_id);")
@@ -407,6 +428,10 @@ class DatabaseManager:
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_study_sessions_source_ext ON study_sessions(source, external_session_id);")
         c.execute("CREATE INDEX IF NOT EXISTS idx_revisions_lecture ON revisions(lecture_id);")
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_weekly_targets_week_subject ON weekly_targets(week_start, subject_id);")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_wt_completions_week ON weekly_target_completions(week_start);")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_wt_completions_lecture ON weekly_target_completions(lecture_id);")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_wt_completions_subject ON weekly_target_completions(subject_id);")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_wt_completions_cid ON weekly_target_completions(client_id);")
 
         # Migration: Ensure test_no column exists in tests table
         c.execute("PRAGMA table_info(tests);")
@@ -579,7 +604,7 @@ class DatabaseManager:
         conn = self.get_connection()
         c = conn.cursor()
 
-        pomo_filter = "AND (deleted_at IS NULL OR deleted_at = '') AND (source = 'Pomodoro' OR (subject != 'Physical Chemistry' AND (client_id IS NULL OR client_id NOT LIKE 'pch_%') AND (external_session_id IS NULL OR external_session_id NOT LIKE 'pch_%')))"
+        pomo_filter = "AND (deleted_at IS NULL OR deleted_at = '') AND source = 'Pomodoro'"
 
         # Check total sessions count
         total_sessions = c.execute(f"SELECT COUNT(*) FROM study_sessions WHERE 1=1 {pomo_filter};").fetchone()[0] or 0
@@ -1779,6 +1804,12 @@ class DatabaseManager:
 
         sql = f"UPDATE lectures SET {field} = ?{extra_sql}, sync_status = 'pending', updated_at = datetime('now', 'localtime') WHERE id = ?;"
         c.execute(sql, [val] + extra_vals + [lecture_id])
+        if field == 'is_completed' and val == 0:
+            c.execute("""
+            UPDATE weekly_target_completions
+            SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending', updated_at = datetime('now', 'localtime')
+            WHERE lecture_id = ? AND (deleted_at IS NULL OR deleted_at = '');
+            """, (lecture_id,))
         conn.commit()
         conn.close()
         return {'success': True}
@@ -2070,7 +2101,7 @@ class DatabaseManager:
         live_hrs = round(live_mins / 60.0, 2)
 
         # Study sessions hours (Actual study time from Pomodoro if synced)
-        pomo_filter = "AND (deleted_at IS NULL OR deleted_at = '') AND (source = 'Pomodoro' OR (subject != 'Physical Chemistry' AND (client_id IS NULL OR client_id NOT LIKE 'pch_%') AND (external_session_id IS NULL OR external_session_id NOT LIKE 'pch_%')))"
+        pomo_filter = "AND (deleted_at IS NULL OR deleted_at = '') AND source = 'Pomodoro'"
         pomodoro_today = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date = ? {pomo_filter};", (today,)).fetchone()[0]
         today_pomodoro_hours = round((pomodoro_today or 0.0) + live_hrs, 2)
 
@@ -2098,19 +2129,24 @@ class DatabaseManager:
 
         # Weekly target progress (5 subjects)
         subjects_list = []
+        total_wt_lec_target = 0
+        total_wt_lec_done = 0
+
         for s in c.execute("SELECT * FROM subjects ORDER BY sort_order;").fetchall():
             s_dict = dict(s)
             target_val = custom_targets.get(s['id'], s['weekly_target_val'])
             is_custom = s['id'] in custom_targets
 
             if s['target_type'] == 'lectures':
+                # Strictly count lectures completed through the weekly target system
                 done = c.execute("""
-                SELECT COUNT(*) FROM lectures
-                WHERE subject_id = ? AND is_completed = 1 AND is_archived = 0
-                  AND (deleted_at IS NULL OR deleted_at = '')
-                  AND ((completed_at >= ? AND completed_at <= ?) OR (scheduled_date >= ? AND scheduled_date <= ?));
-                """, (s['id'], start_of_week, end_of_week, start_of_week, end_of_week)).fetchone()[0]
+                SELECT COUNT(*) FROM weekly_target_completions
+                WHERE subject_id = ? AND week_start = ?
+                  AND (deleted_at IS NULL OR deleted_at = '');
+                """, (s['id'], start_of_week)).fetchone()[0]
                 current_val = done
+                total_wt_lec_target += target_val
+                total_wt_lec_done += current_val
             else:
                 # Study hours come EXCLUSIVELY from external Pomodoro study_sessions
                 p_hrs = c.execute("""
@@ -2151,6 +2187,10 @@ class DatabaseManager:
         has_pomodoro = c.execute("SELECT COUNT(*) FROM study_sessions WHERE (deleted_at IS NULL OR deleted_at = '');").fetchone()[0] > 0
 
         conn.close()
+
+        target_lecs_data = self.get_weekly_target_lectures(start_of_week)
+        recent_study = self.get_recent_study_activity(limit=10)
+
         return {
             'user_name': user_name,
             'current_date': today,
@@ -2183,6 +2223,14 @@ class DatabaseManager:
                 'completion_percentage': round((completed_all_lecs / total_all_lecs) * 100, 1) if total_all_lecs > 0 else 0,
                 'backlog_count': backlog_count
             },
+            'weekly_targets_summary': {
+                'total_lectures_target': int(total_wt_lec_target),
+                'completed_lectures_target': int(total_wt_lec_done),
+                'remaining_lectures_target': max(0, int(total_wt_lec_target - total_wt_lec_done)),
+                'percentage': round((total_wt_lec_done / total_wt_lec_target) * 100, 1) if total_wt_lec_target > 0 else 0
+            },
+            'target_lectures': target_lecs_data.get('lectures', []),
+            'recent_study_activity': recent_study,
             'subjects': subjects_list,
             'upcoming_test': dict(upcoming_test) if upcoming_test else None,
             'today_tasks': [dict(r) for r in today_lectures]
@@ -2510,6 +2558,341 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    # ------------------ WEEKLY TARGET LECTURE COMPLETIONS ------------------
+
+    def complete_target_lecture(self, lecture_id: int, week_start: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Marks a lecture completed specifically as part of the weekly target for week_start.
+        Updates BOTH the weekly target record AND the general syllabus completion state.
+        Guarantees no duplicate records and strict idempotency.
+        """
+        if not week_start:
+            today = datetime.date.today()
+            week_start = (today - datetime.timedelta(days=today.weekday())).isoformat()
+
+        conn = self.get_connection()
+        c = conn.cursor()
+        try:
+            lec = c.execute("SELECT * FROM lectures WHERE id = ?;", (lecture_id,)).fetchone()
+            if not lec:
+                return {'success': False, 'error': f'Lecture {lecture_id} not found'}
+
+            subj = c.execute("SELECT * FROM subjects WHERE id = ?;", (lec['subject_id'],)).fetchone()
+            subj_cid = subj['client_id'] if subj and subj['client_id'] else f"subj_{lec['subject_id']}"
+            now_iso = datetime.datetime.now().isoformat()
+            cid = str(uuid.uuid4())
+
+            # 1. Record weekly target completion
+            c.execute("""
+                INSERT INTO weekly_target_completions (
+                    client_id, week_start, lecture_id, lecture_client_id,
+                    subject_id, subject_client_id, completed_at, sync_status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now', 'localtime'))
+                ON CONFLICT(week_start, lecture_id) DO UPDATE SET
+                    deleted_at = NULL,
+                    completed_at = excluded.completed_at,
+                    sync_status = 'pending',
+                    updated_at = datetime('now', 'localtime');
+            """, (cid, week_start, lecture_id, lec['client_id'], lec['subject_id'], subj_cid, now_iso))
+
+            # 2. Also ensure overall syllabus is completed
+            if not lec['is_completed']:
+                c.execute("""
+                    UPDATE lectures SET
+                        is_completed = 1,
+                        completed_at = ?,
+                        sync_status = 'pending',
+                        updated_at = datetime('now', 'localtime')
+                    WHERE id = ?;
+                """, (now_iso, lecture_id))
+
+            conn.commit()
+            return {
+                'success': True,
+                'lecture_id': lecture_id,
+                'week_start': week_start,
+                'is_completed': 1,
+                'target_completed': 1
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+        finally:
+            conn.close()
+
+    def uncomplete_target_lecture(self, lecture_id: int, week_start: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Unmarks a lecture from weekly target completion (soft-delete).
+        """
+        if not week_start:
+            today = datetime.date.today()
+            week_start = (today - datetime.timedelta(days=today.weekday())).isoformat()
+
+        conn = self.get_connection()
+        c = conn.cursor()
+        try:
+            now_iso = datetime.datetime.now().isoformat()
+            c.execute("""
+                UPDATE weekly_target_completions
+                SET deleted_at = ?, sync_status = 'pending', updated_at = datetime('now', 'localtime')
+                WHERE week_start = ? AND lecture_id = ? AND (deleted_at IS NULL OR deleted_at = '');
+            """, (now_iso, week_start, lecture_id))
+            conn.commit()
+            return {'success': True, 'lecture_id': lecture_id, 'week_start': week_start, 'target_completed': 0}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+        finally:
+            conn.close()
+
+    def toggle_target_lecture(self, lecture_id: int, week_start: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Toggles weekly target completion state for a lecture.
+        """
+        if not week_start:
+            today = datetime.date.today()
+            week_start = (today - datetime.timedelta(days=today.weekday())).isoformat()
+
+        conn = self.get_connection()
+        c = conn.cursor()
+        existing = c.execute("""
+            SELECT id FROM weekly_target_completions
+            WHERE week_start = ? AND lecture_id = ? AND (deleted_at IS NULL OR deleted_at = '');
+        """, (week_start, lecture_id)).fetchone()
+        conn.close()
+
+        if existing:
+            return self.uncomplete_target_lecture(lecture_id, week_start)
+        else:
+            return self.complete_target_lecture(lecture_id, week_start)
+
+    def add_lecture_to_weekly_target(self, lecture_id: int, week_start: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Explicitly assigns a lecture (e.g. from backlog or another chapter) to a weekly target.
+        """
+        if not week_start:
+            today = datetime.date.today()
+            week_start = (today - datetime.timedelta(days=today.weekday())).isoformat()
+
+        conn = self.get_connection()
+        c = conn.cursor()
+        try:
+            lec = c.execute("SELECT * FROM lectures WHERE id = ?;", (lecture_id,)).fetchone()
+            if not lec:
+                return {'success': False, 'error': f'Lecture {lecture_id} not found'}
+
+            # Reschedule lecture into the target week if outside
+            w_dt = datetime.date.fromisoformat(week_start)
+            week_end = (w_dt + datetime.timedelta(days=6)).isoformat()
+            if not (lec['scheduled_date'] >= week_start and lec['scheduled_date'] <= week_end):
+                c.execute("""
+                    UPDATE lectures SET
+                        rescheduled_date = ?,
+                        sync_status = 'pending',
+                        updated_at = datetime('now', 'localtime')
+                    WHERE id = ?;
+                """, (week_start, lecture_id))
+                conn.commit()
+
+            return {'success': True, 'lecture_id': lecture_id, 'week_start': week_start}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+        finally:
+            conn.close()
+
+    def get_weekly_target_lectures(self, week_start: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Returns all lectures assigned to the weekly target for week_start.
+        Includes lectures scheduled/rescheduled for the week, plus any explicitly added or completed in target.
+        For each lecture, provides:
+        - Syllabus completion state (is_completed)
+        - Target completion state (target_completed)
+        """
+        if not week_start:
+            today = datetime.date.today()
+            week_start = (today - datetime.timedelta(days=today.weekday())).isoformat()
+
+        w_dt = datetime.date.fromisoformat(week_start)
+        week_end = (w_dt + datetime.timedelta(days=6)).isoformat()
+
+        conn = self.get_connection()
+        c = conn.cursor()
+
+        # Query weekly target completions for this week
+        wtc_rows = c.execute("""
+            SELECT * FROM weekly_target_completions
+            WHERE week_start = ? AND (deleted_at IS NULL OR deleted_at = '');
+        """, (week_start,)).fetchall()
+        wtc_map = {r['lecture_id']: dict(r) for r in wtc_rows}
+        wtc_lec_ids = set(wtc_map.keys())
+
+        # Strict rule: Physical Chemistry has target_type = 'hours' and is tracked via study sessions, not lectures
+        wtc_in_clause = f"OR l.id IN ({','.join(str(i) for i in wtc_lec_ids)})" if wtc_lec_ids else ""
+        query = f"""
+            SELECT l.*, s.name as subject_name, s.display_name as subject_display_name,
+                   s.color as subject_color, s.target_type, c.name as chapter_name
+            FROM lectures l
+            JOIN subjects s ON l.subject_id = s.id
+            JOIN chapters c ON l.chapter_id = c.id
+            WHERE l.is_archived = 0 AND (l.deleted_at IS NULL OR l.deleted_at = '')
+              AND (
+                  ((l.scheduled_date >= ? AND l.scheduled_date <= ?) OR (l.rescheduled_date >= ? AND l.rescheduled_date <= ?))
+                  {wtc_in_clause}
+              )
+            ORDER BY s.sort_order, l.scheduled_date, l.lecture_no;
+        """
+        rows = c.execute(query, (week_start, week_end, week_start, week_end)).fetchall()
+
+        target_lectures = []
+        for r in rows:
+            lec = dict(r)
+            is_target_done = lec['id'] in wtc_map
+            lec['target_completed'] = 1 if is_target_done else 0
+            lec['target_completion_id'] = wtc_map[lec['id']]['client_id'] if is_target_done else None
+            lec['target_completed_at'] = wtc_map[lec['id']]['completed_at'] if is_target_done else None
+            target_lectures.append(lec)
+
+        conn.close()
+
+        total_target_lecs = len(target_lectures)
+        completed_target_lecs = sum(1 for l in target_lectures if l['target_completed'])
+
+        return {
+            'week_start': week_start,
+            'week_end': week_end,
+            'lectures': target_lectures,
+            'total_target_lectures': total_target_lecs,
+            'completed_target_lectures': completed_target_lecs
+        }
+
+    # ------------------ RECENT STUDY ACTIVITY (GENUINE STUDY RECORDS) ------------------
+
+    def get_recent_study_activity(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Unified Recent Study Activity from genuine learning records.
+        Tracks:
+        - Completed lectures (identifying whether completed as part of weekly target or standard syllabus)
+        - DPPs completed
+        - Revisions completed
+        - Tests completed
+        Sorted by timestamp descending.
+        """
+        conn = self.get_connection()
+        c = conn.cursor()
+        activities = []
+
+        # 1. Completed lectures
+        lec_rows = c.execute("""
+            SELECT l.id, l.client_id, l.lecture_no, l.lecture_name, l.topic, l.completed_at,
+                   s.name as subject_name, s.color as subject_color, c.name as chapter_name
+            FROM lectures l
+            JOIN subjects s ON l.subject_id = s.id
+            JOIN chapters c ON l.chapter_id = c.id
+            WHERE l.is_completed = 1 AND l.completed_at IS NOT NULL AND l.completed_at != ''
+              AND l.is_archived = 0 AND (l.deleted_at IS NULL OR l.deleted_at = '')
+            ORDER BY l.completed_at DESC
+            LIMIT ?;
+        """, (limit,)).fetchall()
+
+        # Check which of these have weekly target completions
+        wt_cids = set(r[0] for r in c.execute("""
+            SELECT lecture_client_id FROM weekly_target_completions
+            WHERE (deleted_at IS NULL OR deleted_at = '');
+        """).fetchall())
+
+        for r in lec_rows:
+            is_wt = r['client_id'] in wt_cids
+            activities.append({
+                'id': f"lec_{r['id']}",
+                'type': 'target_lecture' if is_wt else 'lecture',
+                'type_label': 'Weekly Target Lecture' if is_wt else 'Lecture Completed',
+                'title': f"Lec {r['lecture_no']}: {r['lecture_name']}",
+                'subtitle': f"{r['subject_name']} • {r['chapter_name']}",
+                'subject': r['subject_name'],
+                'subject_color': r['subject_color'],
+                'timestamp': r['completed_at'],
+                'icon': 'target' if is_wt else 'book-open',
+                'badge_color': 'emerald' if is_wt else 'blue'
+            })
+
+        # 2. Completed DPPs
+        dpp_rows = c.execute("""
+            SELECT l.id, l.dpp_no, l.dpp_completed_at, l.lecture_no,
+                   s.name as subject_name, s.color as subject_color, c.name as chapter_name
+            FROM lectures l
+            JOIN subjects s ON l.subject_id = s.id
+            JOIN chapters c ON l.chapter_id = c.id
+            WHERE l.is_dpp_completed = 1 AND l.dpp_completed_at IS NOT NULL AND l.dpp_completed_at != ''
+              AND l.is_archived = 0 AND (l.deleted_at IS NULL OR l.deleted_at = '')
+            ORDER BY l.dpp_completed_at DESC
+            LIMIT ?;
+        """, (limit,)).fetchall()
+        for r in dpp_rows:
+            activities.append({
+                'id': f"dpp_{r['id']}",
+                'type': 'dpp',
+                'type_label': 'DPP Solved',
+                'title': f"DPP #{r['dpp_no']} (Lec {r['lecture_no']})",
+                'subtitle': f"{r['subject_name']} • {r['chapter_name']}",
+                'subject': r['subject_name'],
+                'subject_color': r['subject_color'],
+                'timestamp': r['dpp_completed_at'],
+                'icon': 'file-check-2',
+                'badge_color': 'amber'
+            })
+
+        # 3. Completed Revisions
+        rev_rows = c.execute("""
+            SELECT r.id, r.stage_no, r.completed_at, l.lecture_no, l.lecture_name,
+                   s.name as subject_name, s.color as subject_color, c.name as chapter_name
+            FROM revisions r
+            JOIN lectures l ON r.lecture_id = l.id
+            JOIN subjects s ON l.subject_id = s.id
+            JOIN chapters c ON l.chapter_id = c.id
+            WHERE r.is_completed = 1 AND r.completed_at IS NOT NULL AND r.completed_at != ''
+              AND (r.deleted_at IS NULL OR r.deleted_at = '')
+            ORDER BY r.completed_at DESC
+            LIMIT ?;
+        """, (limit,)).fetchall()
+        for r in rev_rows:
+            activities.append({
+                'id': f"rev_{r['id']}",
+                'type': 'revision',
+                'type_label': f"Revision Stage {r['stage_no']}",
+                'title': f"R{r['stage_no']}: Lec {r['lecture_no']} ({r['lecture_name']})",
+                'subtitle': f"{r['subject_name']} • {r['chapter_name']}",
+                'subject': r['subject_name'],
+                'subject_color': r['subject_color'],
+                'timestamp': r['completed_at'],
+                'icon': 'repeat',
+                'badge_color': 'purple'
+            })
+
+        # 4. Completed Tests
+        test_rows = c.execute("""
+            SELECT id, test_name, test_type, test_date, score, total_marks, updated_at
+            FROM tests
+            WHERE status = 'completed' AND (deleted_at IS NULL OR deleted_at = '')
+            ORDER BY test_date DESC, updated_at DESC
+            LIMIT ?;
+        """, (limit,)).fetchall()
+        for r in test_rows:
+            ts = r['updated_at'] or (r['test_date'] + "T12:00:00")
+            activities.append({
+                'id': f"test_{r['id']}",
+                'type': 'test',
+                'type_label': 'Test Completed',
+                'title': f"{r['test_name']} ({r['test_type']})",
+                'subtitle': f"Score: {r['score']} / {r['total_marks']}",
+                'subject': 'Test',
+                'subject_color': '#e11d48',
+                'timestamp': ts,
+                'icon': 'award',
+                'badge_color': 'rose'
+            })
+
+        activities.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
+        conn.close()
+        return activities[:limit]
+
     def get_tests(self) -> List[Dict[str, Any]]:
         conn = self.get_connection()
         rows = conn.execute("SELECT * FROM tests ORDER BY test_date ASC;").fetchall()
@@ -2775,11 +3158,10 @@ class DatabaseManager:
 
             if t_type == 'lectures':
                 achieved = c.execute("""
-                SELECT COUNT(*) FROM lectures
-                WHERE subject_id = ? AND is_completed = 1 AND is_archived = 0
-                  AND (deleted_at IS NULL OR deleted_at = '')
-                  AND ((completed_at >= ? AND completed_at <= ?) OR (scheduled_date >= ? AND scheduled_date <= ?));
-                """, (s_id, start_of_week, end_of_week, start_of_week, end_of_week)).fetchone()[0] or 0
+                SELECT COUNT(*) FROM weekly_target_completions
+                WHERE subject_id = ? AND week_start = ?
+                  AND (deleted_at IS NULL OR deleted_at = '');
+                """, (s_id, start_of_week)).fetchone()[0] or 0
                 lecture_target_total += target_val
                 lecture_achieved_total += achieved
                 total_subj_lecs = c.execute("SELECT COUNT(*) FROM lectures WHERE subject_id = ? AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');", (s_id,)).fetchone()[0] or 0
@@ -2861,10 +3243,10 @@ class DatabaseManager:
             d_date = (monday_dt + datetime.timedelta(days=i)).isoformat()
             planned_count = c.execute("SELECT COUNT(*) FROM lectures WHERE scheduled_date = ? AND is_archived = 0 AND (deleted_at IS NULL OR deleted_at = '');", (d_date,)).fetchone()[0] or 0
             done_count = c.execute("""
-            SELECT COUNT(*) FROM lectures
-            WHERE scheduled_date = ? AND is_completed = 1 AND is_archived = 0
+            SELECT COUNT(*) FROM weekly_target_completions
+            WHERE week_start = ? AND date(completed_at) = ?
               AND (deleted_at IS NULL OR deleted_at = '');
-            """, (d_date,)).fetchone()[0] or 0
+            """, (start_of_week, d_date)).fetchone()[0] or 0
             dpp_planned = planned_count
             dpp_done = c.execute("""
             SELECT COUNT(*) FROM lectures
@@ -2895,11 +3277,9 @@ class DatabaseManager:
             w_custom = {r['subject_id']: r['target_value'] for r in w_targets}
             w_tgt_sum = sum(w_custom.get(s['id'], s['weekly_target_val']) for s in subjects if s['target_type'] == 'lectures')
             w_done = c.execute("""
-            SELECT COUNT(*) FROM lectures
-            WHERE is_completed = 1 AND is_archived = 0
-              AND (deleted_at IS NULL OR deleted_at = '')
-              AND ((completed_at >= ? AND completed_at <= ?) OR (scheduled_date >= ? AND scheduled_date <= ?));
-            """, (w_start, w_end, w_start, w_end)).fetchone()[0] or 0
+            SELECT COUNT(*) FROM weekly_target_completions
+            WHERE week_start = ? AND (deleted_at IS NULL OR deleted_at = '');
+            """, (w_start,)).fetchone()[0] or 0
 
             w_pct = round((w_done / w_tgt_sum) * 100, 1) if w_tgt_sum > 0 else 0.0
             week_over_week.append({
@@ -2941,7 +3321,7 @@ class DatabaseManager:
             backlog_trend.append({'label': w_lbl, 'date': ref_date, 'count': b_cnt})
 
         # 5. STUDY HOURS & CONSISTENCY (100% Pomodoro only)
-        pomo_filter = "AND (deleted_at IS NULL OR deleted_at = '') AND (source = 'Pomodoro' OR (subject != 'Physical Chemistry' AND (client_id IS NULL OR client_id NOT LIKE 'pch_%') AND (external_session_id IS NULL OR external_session_id NOT LIKE 'pch_%')))"
+        pomo_filter = "AND (deleted_at IS NULL OR deleted_at = '') AND source = 'Pomodoro'"
         total_sessions = c.execute(f"SELECT COUNT(*) FROM study_sessions WHERE 1=1 {pomo_filter};").fetchone()[0] or 0
         has_pomodoro = total_sessions > 0
         pomo_study_hrs = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE 1=1 {pomo_filter};").fetchone()[0] or 0.0
@@ -3117,6 +3497,13 @@ class DatabaseManager:
             },
             'recommendations': recommendations
         }
+        target_lecs = self.get_weekly_target_lectures(start_of_week)
+        recent_study = self.get_recent_study_activity(limit=25)
+        res['target_lectures'] = target_lecs.get('lectures', [])
+        res['weekly_targets']['target_lectures'] = target_lecs.get('lectures', [])
+        res['weekly_targets']['total_target_lectures'] = target_lecs.get('total_target_lectures', 0)
+        res['weekly_targets']['completed_target_lectures'] = target_lecs.get('completed_target_lectures', 0)
+        res['recent_study_activity'] = recent_study
         res['lecture_analytics'] = res['lectures']
         res['dpp_analytics'] = res['dpps']
         res['backlog_analytics'] = res['backlog']
@@ -3156,7 +3543,8 @@ class DatabaseManager:
             'weekly_targets': ['client_id TEXT', 'subject_client_id TEXT', 'sync_status TEXT DEFAULT "synced"', 'deleted_at TEXT'],
             'study_sessions': ['client_id TEXT', 'sync_status TEXT DEFAULT "synced"', 'deleted_at TEXT'],
             'revisions': ['client_id TEXT', 'lecture_client_id TEXT', 'sync_status TEXT DEFAULT "synced"', 'deleted_at TEXT'],
-            'question_practice_logs': ['client_id TEXT', 'subject_client_id TEXT', 'chapter_client_id TEXT', 'lecture_client_id TEXT', 'sync_status TEXT DEFAULT "synced"', 'deleted_at TEXT']
+            'question_practice_logs': ['client_id TEXT', 'subject_client_id TEXT', 'chapter_client_id TEXT', 'lecture_client_id TEXT', 'sync_status TEXT DEFAULT "synced"', 'deleted_at TEXT'],
+            'weekly_target_completions': ['client_id TEXT', 'subject_client_id TEXT', 'lecture_client_id TEXT', 'sync_status TEXT DEFAULT "synced"', 'deleted_at TEXT']
         }
 
         for table, col_defs in tables.items():
@@ -3351,7 +3739,7 @@ class DatabaseManager:
     def mark_all_pending_for_sync(self):
         """Marks all local rows as pending so initial sync uploads full data to Supabase."""
         conn = self.get_connection()
-        for table in ['subjects', 'chapters', 'lectures', 'tests', 'weekly_targets', 'study_sessions', 'revisions']:
+        for table in ['subjects', 'chapters', 'lectures', 'tests', 'weekly_targets', 'study_sessions', 'revisions', 'weekly_target_completions']:
             conn.execute(f"UPDATE {table} SET sync_status = 'pending'")
         conn.commit()
         conn.close()
@@ -3360,7 +3748,7 @@ class DatabaseManager:
         """Returns total count of pending sync records across all tables."""
         conn = self.get_connection()
         total = 0
-        for table in ['subjects', 'chapters', 'lectures', 'tests', 'weekly_targets', 'study_sessions', 'revisions']:
+        for table in ['subjects', 'chapters', 'lectures', 'tests', 'weekly_targets', 'study_sessions', 'revisions', 'weekly_target_completions']:
             cnt = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE sync_status = 'pending'").fetchone()[0]
             total += cnt
         conn.close()
@@ -3593,6 +3981,53 @@ class DatabaseManager:
                         INSERT OR IGNORE INTO weekly_targets (client_id, week_start, subject_id, subject_client_id, target_value, sync_status)
                         VALUES (?, ?, ?, ?, ?, 'synced')
                     """, (client_id, r.get('week_start'), subj_id, subj_cid, r.get('target_value')))
+        conn.commit()
+        conn.close()
+
+    def merge_cloud_weekly_target_completions(self, cloud_rows: List[Dict[str, Any]]):
+        """Merges weekly target completion records from Supabase."""
+        conn = self.get_connection()
+        c = conn.cursor()
+        for r in cloud_rows:
+            cid = r.get('client_id')
+            if not cid:
+                continue
+            week_start = r.get('week_start')
+            lec_cid = r.get('lecture_client_id')
+            subj_cid = r.get('subject_client_id')
+            completed_at = r.get('completed_at') or datetime.datetime.now().isoformat()
+            deleted_at = r.get('deleted_at')
+
+            l_row = c.execute("SELECT id, subject_id FROM lectures WHERE client_id = ?", (lec_cid,)).fetchone()
+            if not l_row:
+                continue
+            lec_id = l_row['id']
+            subj_id = l_row['subject_id']
+
+            existing = c.execute("SELECT id, sync_status, deleted_at FROM weekly_target_completions WHERE client_id = ?", (cid,)).fetchone()
+            if existing:
+                if existing['sync_status'] == 'pending' and existing['deleted_at']:
+                    continue
+                c.execute("""
+                    UPDATE weekly_target_completions SET
+                        week_start = ?, lecture_id = ?, lecture_client_id = ?,
+                        subject_id = ?, subject_client_id = ?, completed_at = ?,
+                        deleted_at = ?, sync_status = 'synced', updated_at = datetime('now', 'localtime')
+                    WHERE client_id = ?;
+                """, (week_start, lec_id, lec_cid, subj_id, subj_cid, completed_at, deleted_at, cid))
+            else:
+                c.execute("""
+                    INSERT INTO weekly_target_completions (
+                        client_id, week_start, lecture_id, lecture_client_id,
+                        subject_id, subject_client_id, completed_at, sync_status, deleted_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'synced', ?)
+                    ON CONFLICT(week_start, lecture_id) DO UPDATE SET
+                        client_id = excluded.client_id,
+                        completed_at = excluded.completed_at,
+                        deleted_at = excluded.deleted_at,
+                        sync_status = 'synced';
+                """, (cid, week_start, lec_id, lec_cid, subj_id, subj_cid, completed_at, deleted_at))
+
         conn.commit()
         conn.close()
 

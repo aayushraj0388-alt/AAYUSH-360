@@ -25,6 +25,7 @@ class AppAPI:
         self.pomodoro_sync = PomodoroSyncEngine(db)
         self.pomodoro_sync.start_watcher_if_enabled()
         self.cloud_sync = CloudSyncEngine(db, pomodoro_sync=self.pomodoro_sync)
+        self.pomodoro_sync.cloud_sync = self.cloud_sync
         self.cloud_sync.start_background_sync()
 
         # Connect session commit callback to auto-sync

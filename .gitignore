@@ -46,4 +46,5 @@ gh_cli/
 # WebView2 / App data cache
 webview_cache/
 EBWebView/
+backup_pomodoro_leveldb/
 

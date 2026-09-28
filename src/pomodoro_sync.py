@@ -1,34 +1,33 @@
 """
 AAYUSH 360 - LevelDB Pomodoro Integration Engine
 
-Read-only, real-time synchronization from the Study Pomodoro desktop app.
-Reads the Pomodoro app's WebView2 LevelDB localStorage safely using raw binary
-access with FileShare semantics - never opens LevelDB as a database, never
-acquires the LOCK, never modifies the Pomodoro app in any way.
+Source of Truth: Study Pomodoro Desktop Application (Tauri / WebView2 LevelDB).
+Storage Path:
+  C:\\Users\\User\\AppData\\Local\\com.pedro.studypomodoro\\EBWebView\\Default\\Local Storage\\leveldb
+Storage Key:
+  pomodoroStats
 
-Core guarantees:
-  1. READ-ONLY: Never touches or modifies the Pomodoro app's storage.
-  2. FRESH START: Activation records a baseline; only NEW activity since
-     activation is imported (zero historical data imported ever).
-  3. REAL-TIME LIVE SESSION:
-     - Detects when Pedro Study Pomodoro timer is actively running.
-     - Tracks live elapsed study duration in real time.
-     - When session ends, commits persistent Study Time Log to SQLite.
-     - Prevents duplicate insertion.
-  4. RESET SAFE: If Pomodoro resets its stats (totals decrease), treats the
-     new lower value as a new baseline - no negative time imported.
-  5. CRASH SAFE: Pomodoro integration failures never crash AAYUSH 360.
-  6. INDEPENDENT: Pomodoro time NEVER marks lectures, DPPs, chapters, revisions,
-     subjects, or weekly targets as completed. Lecture completion is manual-only.
-
-Storage key used: pomodoroStats
-  { days: { "YYYY-MM-DD": { minutes, focusCount } },
-    hours: { "0".."23": minutes },
-    totalMinutes: int, totalFocus: int, firstUse: "YYYY-MM-DD" }
-
-LevelDB path (automatically discovered):
-  C:\\Users\\User\\AppData\\Local\\com.pedro.studypomodoro
-    \\EBWebView\\Default\\Local Storage\\leveldb\\
+Guarantees & Architecture:
+  1. REAL DATA AS SOURCE OF TRUTH:
+     Reads the genuine Study Pomodoro LevelDB data directly without inventing or fabricating data.
+  2. PRESERVES REAL DATA STRUCTURE:
+     The Study Pomodoro application stores daily study minutes and focus counts per date (daily aggregates).
+     These daily aggregates are migrated as canonical daily records without fabricating fake session timestamps
+     or splitting the daily total into artificial sessions.
+  3. DATE RANGE:
+     Starts from 28 September 2026 and continues dynamically into the future.
+  4. IDEMPOTENT & DEDUPLICATED:
+     Uses deterministic, stable identifiers (client_id: pomo_day_{YYYY-MM-DD}, external_session_id: pomo_daily_{YYYY-MM-DD}).
+     Running sync multiple times never creates duplicates.
+  5. SOFT-DELETION OF LEGACY FRAGMENTS:
+     Old fragmented sessions (from previous implementations that split daily totals) are soft-deleted
+     to prevent double counting.
+  6. BIDIRECTIONAL SYNC:
+     Windows reads LevelDB, commits to local SQLite, and pushes to Supabase study_sessions table.
+     Android syncs from Supabase study_sessions table and displays the identical dataset.
+  7. INDEPENDENT:
+     Pomodoro data is strictly filtered by source = 'Pomodoro'. Unrelated study data (Physical Chemistry hours,
+     lectures, DPPs, tests) is NEVER mixed into Pomodoro totals.
 """
 
 import os
@@ -38,7 +37,7 @@ import datetime
 import threading
 import time
 import subprocess
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, List
 
 # ---------------------------------------------------------------------------
 # Constants & Automatic Storage Discovery
@@ -73,13 +72,13 @@ def get_default_leveldb_dir() -> str:
 
 LEVELDB_DIR = get_default_leveldb_dir()
 
-# Regex that matches the full pomodoroStats JSON blob:
+# Regex that matches the full pomodoroStats JSON blob without arbitrary size limits
 _STATS_RE = re.compile(
-    rb'\{\s*"days"\s*:\s*\{.{0,8000}?\}\s*,\s*"hours"\s*:\s*\{.{0,2000}?\}\s*,\s*"totalMinutes"\s*:\s*(\d+)\s*,\s*"totalFocus"\s*:\s*(\d+)\s*,\s*"firstUse"\s*:\s*"[^"]+"\s*\}',
+    rb'\{\s*"days"\s*:\s*\{.*?\}\s*,\s*"hours"\s*:\s*\{.*?\}\s*,\s*"totalMinutes"\s*:\s*(\d+)\s*,\s*"totalFocus"\s*:\s*(\d+)\s*,\s*"firstUse"\s*:\s*"[^"]+"\s*\}',
     re.DOTALL
 )
 
-# Settings keys stored in AAYUSH 360's own SQLite DB
+# Settings keys stored in AAYUSH 360's SQLite DB
 KEY_ENABLED = 'pomo_integration_enabled'
 KEY_ACTIVATED_AT = 'pomo_activated_at'
 KEY_BASELINE_MINUTES = 'pomo_baseline_total_minutes'
@@ -134,7 +133,6 @@ def _resolve_active_log(leveldb_dir: str) -> Optional[str]:
     """
     Dynamically resolves the active WAL log filename.
     Scans for *.log files and returns the one with the largest modification time.
-    Never hardcodes '000152.log'.
     """
     if not os.path.isdir(leveldb_dir):
         return None
@@ -226,20 +224,17 @@ def read_pomodoro_stats(leveldb_dir: str = LEVELDB_DIR) -> Optional[Dict[str, An
 
 class PomodoroSyncEngine:
     """
-    Manages the real-time Pomodoro integration lifecycle for AAYUSH 360.
-
-    Guarantees:
-      - Live current session detection and elapsed duration display.
-      - Conversion of completed sessions into persistent Study Time Logs.
-      - Zero duplication.
-      - Zero impact on lectures / DPPs / chapters / subjects / weekly targets.
+    Manages the Pomodoro integration lifecycle for AAYUSH 360.
+    Reads the real LevelDB source of truth, synchronizes canonical daily records,
+    eliminates double counting, and drives bidirectional cloud synchronization.
     """
 
-    def __init__(self, db):
+    def __init__(self, db, cloud_sync=None):
         self.db = db
+        self.cloud_sync = cloud_sync
         self._watch_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._leveldb_dir = get_default_leveldb_dir()
         self.on_session_committed = None
         self._live_session = {
@@ -279,336 +274,179 @@ class PomodoroSyncEngine:
             pass
 
     # -----------------------------------------------------------------------
-    # Persistent Session Commit
+    # Core Data Migration & Sync Engine
     # -----------------------------------------------------------------------
 
-    def _commit_completed_session(
-        self,
-        date_str: str,
-        duration_minutes: float,
-        focus_count: int,
-        start_time: str = '',
-        end_time: str = ''
-    ) -> bool:
+    def sync_from_source(self, start_date: str = "2026-09-28", push_cloud: bool = True) -> Dict[str, Any]:
         """
-        Converts completed Pomodoro activity into a persistent Study Time Log.
-        Idempotent insertion based on external_session_id.
-        NEVER touches lectures, DPPs, chapters, or subjects.
+        Reads real Pomodoro stats from LevelDB and synchronizes canonical daily records.
+        Idempotent: running multiple times never creates duplicates.
+        Eliminates double counting by soft-deleting old fragmented records.
         """
-        if duration_minutes <= 0:
-            return False
-        try:
-            dur_hours = round(duration_minutes / 60.0, 2)
-            now_ts = int(time.time())
-            ext_id = f"pomo_session_{date_str}_{now_ts}_{int(duration_minutes)}m"
+        with self._lock:
+            stats = read_pomodoro_stats(self._leveldb_dir)
+            if not stats:
+                return {
+                    'success': False,
+                    'status': 'Waiting',
+                    'message': 'Study Pomodoro storage not accessible'
+                }
 
-            notes = f"Pomodoro session ({int(duration_minutes)} min"
-            if focus_count > 0:
-                notes += f", {focus_count} completed focus interval{'s' if focus_count > 1 else ''}"
-            notes += ")"
+            days_data = stats.get("days", {})
+            target_dates = {d: info for d, info in days_data.items() if d >= start_date}
 
-            import uuid
-            cid = str(uuid.uuid4())
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            now_local = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
             conn = self.db.get_connection()
             c = conn.cursor()
-            c.execute("""
-                INSERT INTO study_sessions (
-                    source, external_session_id, date, start_time, end_time,
-                    duration_minutes, duration_hours, subject, chapter, topic,
-                    activity, notes, client_id, sync_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-                ON CONFLICT(source, external_session_id) DO UPDATE SET
-                    duration_minutes = excluded.duration_minutes,
-                    duration_hours   = excluded.duration_hours,
-                    notes            = excluded.notes,
-                    sync_status      = 'pending',
-                    updated_at       = datetime('now', 'localtime');
-            """, (
-                'Pomodoro',
-                ext_id,
-                date_str,
-                start_time or datetime.datetime.now().strftime('%H:%M'),
-                end_time or datetime.datetime.now().strftime('%H:%M'),
-                round(duration_minutes, 2),
-                dur_hours,
-                'Pomodoro Study Time',
-                '',
-                '',
-                'Other',
-                notes,
-                cid
-            ))
+
+            # Find existing study_sessions for dates >= start_date
+            existing_rows = c.execute("""
+                SELECT id, client_id, source, external_session_id, date, duration_minutes, duration_hours, notes, deleted_at, sync_status
+                FROM study_sessions
+                WHERE date >= ?;
+            """, (start_date,)).fetchall()
+
+            migrated_count = 0
+            soft_deleted_cids = []
+
+            # 1. Upsert canonical daily records
+            for d, info in sorted(target_dates.items()):
+                mins = float(info.get("minutes", 0))
+                fc = int(info.get("focusCount", 0))
+                hrs = round(mins / 60.0, 2)
+                cid = f"pomo_day_{d}"
+                ext_id = f"pomo_daily_{d}"
+                notes = f"Pomodoro study ({int(mins)} min, {fc} focus session{'s' if fc != 1 else ''})"
+                topic = f"Focus Sessions: {fc}"
+
+                existing_can = c.execute("SELECT id, duration_minutes, deleted_at, sync_status FROM study_sessions WHERE client_id = ?", (cid,)).fetchone()
+                if existing_can:
+                    # Update if minutes or status changed
+                    if existing_can['duration_minutes'] != mins or existing_can['deleted_at'] is not None:
+                        c.execute("""
+                            UPDATE study_sessions SET
+                                source = 'Pomodoro',
+                                external_session_id = ?,
+                                date = ?,
+                                duration_minutes = ?,
+                                duration_hours = ?,
+                                subject = 'Pomodoro Study Time',
+                                topic = ?,
+                                notes = ?,
+                                deleted_at = NULL,
+                                sync_status = 'pending',
+                                updated_at = ?
+                            WHERE client_id = ?;
+                        """, (ext_id, d, mins, hrs, topic, notes, now_local, cid))
+                        migrated_count += 1
+                else:
+                    c.execute("""
+                        INSERT INTO study_sessions (
+                            client_id, source, external_session_id, date, start_time, end_time,
+                            duration_minutes, duration_hours, subject, chapter, topic, activity, notes,
+                            sync_status, created_at, updated_at
+                        ) VALUES (?, 'Pomodoro', ?, ?, '', '', ?, ?, 'Pomodoro Study Time', '', ?, 'Other', ?, 'pending', ?, ?);
+                    """, (cid, ext_id, d, mins, hrs, topic, notes, now_local, now_local))
+                    migrated_count += 1
+
+            # 2. Soft-delete old fragmented records to eliminate double-counting
+            canonical_cids = {f"pomo_day_{d}" for d in target_dates}
+            for s in existing_rows:
+                cid = s["client_id"]
+                ext_id = s["external_session_id"] or ""
+                if cid in canonical_cids:
+                    continue
+                # Preserve genuine manual sessions from Android
+                if ext_id.startswith("manual_"):
+                    continue
+                # Soft-delete fragmented chunks or old test records
+                if s["source"] == "Pomodoro" or ext_id.startswith("pomo_session_") or cid.startswith("test_") or ext_id.startswith("ext_test_"):
+                    if not s["deleted_at"]:
+                        c.execute("""
+                            UPDATE study_sessions SET
+                                deleted_at = ?,
+                                sync_status = 'pending',
+                                updated_at = ?
+                            WHERE client_id = ?;
+                        """, (now_iso, now_local, cid))
+                        soft_deleted_cids.append(cid)
+
             conn.commit()
             conn.close()
-            print(f"[PomodoroSync] Successfully committed {duration_minutes} min session (client_id: {cid}, ext_id: {ext_id})")
-            if self.on_session_committed and callable(self.on_session_committed):
-                try:
-                    self.on_session_committed()
-                except Exception as cb_err:
-                    print(f"[PomodoroSync] on_session_committed error: {cb_err}")
-            return True
-        except Exception as e:
-            print("Error committing study session:", e)
-            return False
 
-    def flush_live_session(self, force: bool = True) -> Dict[str, Any]:
-        """
-        Forces immediate conversion of any uncommitted/live Pomodoro study minutes
-        into a persistent Study Time Log in SQLite, with sync_status='pending'.
-        Guarantees that pending sync payload ALWAYS contains the latest Pomodoro data.
-        Safe to call at any time, even while Pedro timer is actively running.
-        """
-        with self._lock:
-            settings = self._get_settings()
-            if settings.get(KEY_ENABLED, 'false') != 'true':
-                return {'flushed': False, 'minutes': 0}
-
-            current_stats = read_pomodoro_stats(self._leveldb_dir)
-            if not current_stats:
-                return {'flushed': False, 'minutes': 0}
-
-            cur_total_minutes = int(current_stats.get('totalMinutes', 0))
-            cur_total_focus   = int(current_stats.get('totalFocus', 0))
-
-            baseline_mins = int(settings.get(KEY_BASELINE_MINUTES, cur_total_minutes))
-            last_processed_mins = int(settings.get(KEY_LAST_MINUTES, baseline_mins))
-            last_processed_focus = int(settings.get(KEY_LAST_FOCUS, cur_total_focus))
-
-            delta_mins = max(0, cur_total_minutes - last_processed_mins)
-            live_mins = self._live_session.get('current_minutes', 0)
-            duration = max(delta_mins, live_mins)
-            focus_delta = max(0, cur_total_focus - last_processed_focus)
-
-            if duration <= 0:
-                return {'flushed': False, 'minutes': 0}
-
-            today_str = datetime.date.today().isoformat()
-            now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            start_t = self._live_session.get('start_time') or datetime.datetime.now().strftime('%H:%M')
-            end_t = datetime.datetime.now().strftime('%H:%M')
-
-            committed = self._commit_completed_session(
-                date_str=today_str,
-                duration_minutes=duration,
-                focus_count=focus_delta,
-                start_time=start_t,
-                end_time=end_t
-            )
-
-            if committed:
-                self._set_settings({
-                    KEY_LAST_MINUTES:    str(cur_total_minutes),
-                    KEY_LAST_FOCUS:      str(cur_total_focus),
-                    KEY_LIVE_ACTIVE:     'false',
-                    KEY_LIVE_MINUTES:    '0',
-                    KEY_LIVE_START_TIME: '',
-                    KEY_LAST_SYNC:       now_str
-                })
-                self._live_session['active'] = False
-                self._live_session['current_minutes'] = 0
-                self._live_session['start_minutes'] = cur_total_minutes
-                print(f"[PomodoroSync] Flushed {duration} minutes into persistent study_sessions")
-                return {'flushed': True, 'minutes': duration}
-
-            return {'flushed': False, 'minutes': 0}
-
-    # -----------------------------------------------------------------------
-    # Real-Time & Live Session Detection Loop
-    # -----------------------------------------------------------------------
-
-    def _check_sync_and_live(self) -> Dict[str, Any]:
-        """
-        Core real-time engine:
-        1. Checks current LevelDB totals.
-        2. Detects if Pedro Pomodoro timer is actively running.
-        3. Updates live elapsed duration while timer runs.
-        4. When timer stops or session completes, converts to persistent log.
-        """
-        with self._lock:
-            settings = self._get_settings()
-            if settings.get(KEY_ENABLED, 'false') != 'true':
-                return {'is_active': False, 'status': 'Disabled'}
-
-            current_stats = read_pomodoro_stats(self._leveldb_dir)
-            now = time.time()
-            now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            today_str = datetime.date.today().isoformat()
-
-            if current_stats is None:
-                self._set_settings({
-                    KEY_SYNC_STATUS: 'Waiting (Pomodoro storage not accessible)',
-                    KEY_LIVE_ACTIVE: 'false',
-                    KEY_LIVE_MINUTES: '0'
-                })
-                self._live_session['active'] = False
-                return {'is_active': False, 'status': 'Waiting'}
-
-            cur_total_minutes = int(current_stats.get('totalMinutes', 0))
-            cur_total_focus   = int(current_stats.get('totalFocus', 0))
-
-            baseline_mins = int(settings.get(KEY_BASELINE_MINUTES, cur_total_minutes))
-            last_processed_mins = int(settings.get(KEY_LAST_MINUTES, baseline_mins))
-            last_processed_focus = int(settings.get(KEY_LAST_FOCUS, cur_total_focus))
-
-            # Detect stats reset
-            if cur_total_minutes < last_processed_mins or cur_total_focus < last_processed_focus:
-                self._set_settings({
-                    KEY_BASELINE_MINUTES: str(cur_total_minutes),
-                    KEY_BASELINE_FOCUS:   str(cur_total_focus),
-                    KEY_LAST_MINUTES:     str(cur_total_minutes),
-                    KEY_LAST_FOCUS:       str(cur_total_focus),
-                    KEY_LIVE_ACTIVE:      'false',
-                    KEY_LIVE_MINUTES:     '0',
-                    KEY_SYNC_STATUS:      'Connected (Baseline reset)'
-                })
-                self._live_session['active'] = False
-                return {'is_active': False, 'status': 'Connected'}
-
-            # Check app running and active log modification age
+            # 3. Check live running status
             app_running = is_pedro_process_running()
             active_log = _resolve_active_log(self._leveldb_dir)
             log_mtime = os.path.getmtime(active_log) if (active_log and os.path.exists(active_log)) else 0.0
-            log_age = now - log_mtime
-
-            # The Pedro Pomodoro timer writes an update to LevelDB every ~60 seconds of study.
-            # If written within the last 110s and process is running, timer is actively running!
+            log_age = time.time() - log_mtime
             timer_active = app_running and (log_age <= 110.0)
 
-            delta_mins_since_last = cur_total_minutes - last_processed_mins
-            focus_delta = max(0, cur_total_focus - last_processed_focus)
+            status_str = 'Currently Studying' if timer_active else ('Connected' if app_running else 'Connected (App idle)')
 
-            # --- CASE 1: TIMER IS ACTIVELY RUNNING ---
-            if timer_active:
-                if not self._live_session['active']:
-                    self._live_session['active'] = True
-                    self._live_session['start_minutes'] = last_processed_mins
-                    self._live_session['start_time'] = datetime.datetime.now().strftime('%H:%M')
-                    self._live_session['last_update_ts'] = now
+            today_str = datetime.date.today().isoformat()
+            today_mins = days_data.get(today_str, {}).get("minutes", 0)
 
-                live_elapsed = max(1, cur_total_minutes - self._live_session['start_minutes'])
-                self._live_session['current_minutes'] = live_elapsed
-                self._live_session['last_update_ts'] = now
-
-                self._set_settings({
-                    KEY_LIVE_ACTIVE:     'true',
-                    KEY_LIVE_MINUTES:    str(live_elapsed),
-                    KEY_LIVE_START_TIME: self._live_session['start_time'],
-                    KEY_SYNC_STATUS:     'Currently Studying',
-                    KEY_LAST_SYNC:       now_str
-                })
-
-                return {
-                    'is_active': True,
-                    'app_running': True,
-                    'elapsed_minutes': live_elapsed,
-                    'start_time': self._live_session['start_time'],
-                    'status': 'Currently Studying'
-                }
-
-            # --- CASE 2: TIMER IS NOT ACTIVE (SESSION COMPLETED OR STOPPED) ---
-            if self._live_session['active'] or delta_mins_since_last > 0:
-                duration = delta_mins_since_last if delta_mins_since_last > 0 else self._live_session.get('current_minutes', 0)
-                start_t = self._live_session.get('start_time') or datetime.datetime.now().strftime('%H:%M')
-                end_t = datetime.datetime.now().strftime('%H:%M')
-
-                if duration > 0:
-                    self._commit_completed_session(
-                        date_str=today_str,
-                        duration_minutes=duration,
-                        focus_count=focus_delta,
-                        start_time=start_t,
-                        end_time=end_t
-                    )
-
-                # Advance processed marks
-                self._set_settings({
-                    KEY_LAST_MINUTES:    str(cur_total_minutes),
-                    KEY_LAST_FOCUS:      str(cur_total_focus),
-                    KEY_LIVE_ACTIVE:     'false',
-                    KEY_LIVE_MINUTES:    '0',
-                    KEY_LIVE_START_TIME: '',
-                    KEY_SYNC_STATUS:     'Connected' if app_running else 'Connected (App idle)',
-                    KEY_LAST_SYNC:       now_str
-                })
-
-                self._live_session['active'] = False
-                self._live_session['current_minutes'] = 0
-
-                return {
-                    'is_active': False,
-                    'app_running': app_running,
-                    'elapsed_minutes': 0,
-                    'status': 'Connected'
-                }
-
-            # --- CASE 3: IDLE ---
             self._set_settings({
-                KEY_LIVE_ACTIVE: 'false',
-                KEY_LIVE_MINUTES: '0',
-                KEY_SYNC_STATUS: 'Connected' if app_running else 'Connected (App idle)',
-                KEY_LAST_SYNC: now_str
+                KEY_ENABLED:          'true',
+                KEY_SYNC_STATUS:      status_str,
+                KEY_LAST_SYNC:        now_local,
+                KEY_LAST_MINUTES:     str(stats.get('totalMinutes', 0)),
+                KEY_LAST_FOCUS:       str(stats.get('totalFocus', 0)),
+                KEY_LIVE_ACTIVE:      'true' if timer_active else 'false',
+                KEY_LIVE_MINUTES:     str(today_mins) if timer_active else '0',
+                'pomodoro_source_path': self._leveldb_dir,
+                'pomodoro_sync_status': status_str,
+                'pomodoro_last_sync':   now_local,
             })
-            return {
-                'is_active': False,
-                'app_running': app_running,
-                'elapsed_minutes': 0,
-                'status': 'Connected'
+
+            result_payload = {
+                'success': True,
+                'status': status_str,
+                'is_active': timer_active,
+                'today_minutes': today_mins,
+                'dates_synced': len(target_dates),
+                'fragments_cleaned': len(soft_deleted_cids),
+                'message': f"Synchronized Pomodoro data from {start_date} onwards. Today: {today_mins} min."
             }
+
+        # 4. Trigger Cloud Sync outside lock if available
+        if push_cloud and self.cloud_sync:
+            try:
+                self.cloud_sync.sync_now()
+            except Exception as sync_err:
+                print(f"[PomodoroSync] Cloud sync trigger warning: {sync_err}")
+
+        if self.on_session_committed and callable(self.on_session_committed):
+            try:
+                self.on_session_committed()
+            except Exception:
+                pass
+
+        return result_payload
+
+    def flush_live_session(self, force: bool = True) -> Dict[str, Any]:
+        """Synchronizes source data into SQLite and prepares pending records for cloud push."""
+        res = self.sync_from_source(push_cloud=False)
+        return {'flushed': res.get('success', False), 'minutes': res.get('today_minutes', 0)}
 
     # -----------------------------------------------------------------------
     # Public API
     # -----------------------------------------------------------------------
 
     def enable_integration(self) -> Dict[str, Any]:
-        """
-        Enables the Pomodoro integration with a fresh baseline.
-        Reads current Pomodoro totals and stores them as the baseline.
-        Zero historical data is imported.
-        """
-        current_stats = read_pomodoro_stats(self._leveldb_dir)
-        now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-        if current_stats is None:
-            baseline_mins  = 0
-            baseline_focus = 0
-            status_msg = 'Waiting (Pomodoro storage not accessible)'
-        else:
-            baseline_mins  = int(current_stats.get('totalMinutes', 0))
-            baseline_focus = int(current_stats.get('totalFocus', 0))
-            status_msg = 'Connected'
-
-        self._live_session['active'] = False
-        self._live_session['current_minutes'] = 0
-
-        self._set_settings({
-            KEY_ENABLED:          'true',
-            KEY_ACTIVATED_AT:     now_str,
-            KEY_BASELINE_MINUTES: str(baseline_mins),
-            KEY_BASELINE_FOCUS:   str(baseline_focus),
-            KEY_LAST_MINUTES:     str(baseline_mins),
-            KEY_LAST_FOCUS:       str(baseline_focus),
-            KEY_LAST_SYNC:        now_str,
-            KEY_SYNC_STATUS:      status_msg,
-            KEY_LIVE_ACTIVE:      'false',
-            KEY_LIVE_MINUTES:     '0',
-            KEY_LIVE_START_TIME:  '',
-            'pomodoro_source_path': self._leveldb_dir,
-            'pomodoro_sync_status': status_msg,
-            'pomodoro_last_sync':   now_str,
-        })
-
+        """Enables the Pomodoro integration, runs initial sync, and starts live watcher."""
+        res = self.sync_from_source(push_cloud=True)
         self._start_watcher()
-
         return {
-            'success': True,
-            'message': f'Integration enabled. Baseline: {baseline_mins} min / {baseline_focus} sessions. Only NEW activity counts.',
-            'baseline_minutes': baseline_mins,
-            'baseline_focus': baseline_focus,
-            'activated_at': now_str
+            'success': res.get('success', True),
+            'message': 'Pomodoro integration enabled. Synchronized with LevelDB source.',
+            'status': res.get('status', 'Connected')
         }
 
     def disable_integration(self) -> Dict[str, Any]:
-        """Disables automatic syncing. Existing imported records are kept intact."""
+        """Disables automatic syncing. Existing records are preserved."""
         self._stop_watcher()
         self._live_session['active'] = False
         now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -626,56 +464,12 @@ class PomodoroSyncEngine:
         }
 
     def reset_integration(self) -> Dict[str, Any]:
-        """Resets baseline to current Pomodoro totals. Keeps existing records."""
-        current_stats = read_pomodoro_stats(self._leveldb_dir)
-        now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-        if current_stats is None:
-            baseline_mins = 0
-            baseline_focus = 0
-        else:
-            baseline_mins = int(current_stats.get('totalMinutes', 0))
-            baseline_focus = int(current_stats.get('totalFocus', 0))
-
-        self._live_session['active'] = False
-        self._live_session['current_minutes'] = 0
-
-        self._set_settings({
-            KEY_ENABLED:          'true',
-            KEY_ACTIVATED_AT:     now_str,
-            KEY_BASELINE_MINUTES: str(baseline_mins),
-            KEY_BASELINE_FOCUS:   str(baseline_focus),
-            KEY_LAST_MINUTES:     str(baseline_mins),
-            KEY_LAST_FOCUS:       str(baseline_focus),
-            KEY_LAST_SYNC:        now_str,
-            KEY_SYNC_STATUS:      'Connected (Reset)',
-            KEY_LIVE_ACTIVE:      'false',
-            KEY_LIVE_MINUTES:     '0',
-            KEY_LIVE_START_TIME:  '',
-            'pomodoro_sync_status': 'Connected (Reset)',
-            'pomodoro_last_sync':   now_str,
-        })
-
-        return {
-            'success': True,
-            'message': f'Baseline reset to {baseline_mins} min. Only future activity will count.',
-            'baseline_minutes': baseline_mins,
-            'baseline_focus': baseline_focus,
-        }
+        """Re-syncs directly from PC LevelDB without losing real data."""
+        return self.enable_integration()
 
     def sync(self, source_path: Optional[str] = None) -> Dict[str, Any]:
-        """Manual sync trigger. Runs real-time check and returns status."""
-        try:
-            live = self._check_sync_and_live()
-            return {
-                'success': True,
-                'status': live.get('status', 'Connected'),
-                'is_active': live.get('is_active', False),
-                'live_minutes': live.get('elapsed_minutes', 0),
-                'message': 'Synchronized successfully with Pomodoro storage.'
-            }
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        """Manual sync trigger. Reads PC LevelDB and syncs to SQLite and Cloud."""
+        return self.sync_from_source(push_cloud=True)
 
     def get_live_status(self) -> Dict[str, Any]:
         """Fast endpoint called by the frontend polling ticker."""
@@ -684,67 +478,78 @@ class PomodoroSyncEngine:
         if not enabled:
             return {'is_active': False, 'status': 'Disabled', 'elapsed_minutes': 0}
 
-        live_info = self._check_sync_and_live()
-        return live_info
+        app_running = is_pedro_process_running()
+        active_log = _resolve_active_log(self._leveldb_dir)
+        log_mtime = os.path.getmtime(active_log) if (active_log and os.path.exists(active_log)) else 0.0
+        log_age = time.time() - log_mtime
+        timer_active = app_running and (log_age <= 110.0)
+
+        today_str = datetime.date.today().isoformat()
+        today_mins = 0
+        try:
+            conn = self.db.get_connection()
+            row = conn.execute("""
+                SELECT duration_minutes FROM study_sessions
+                WHERE date = ? AND (deleted_at IS NULL OR deleted_at = '') AND source = 'Pomodoro'
+                ORDER BY id DESC LIMIT 1;
+            """, (today_str,)).fetchone()
+            if row:
+                today_mins = int(round(row[0]))
+            conn.close()
+        except Exception:
+            pass
+
+        return {
+            'is_active': timer_active,
+            'app_running': app_running,
+            'status': 'Currently Studying' if timer_active else ('Connected' if app_running else 'Connected (App idle)'),
+            'elapsed_minutes': today_mins
+        }
 
     def get_status(self) -> Dict[str, Any]:
-        """Returns the full integration status and aggregated statistics."""
+        """Returns full integration status and statistics calculated from genuine Pomodoro data."""
         settings = self._get_settings()
         enabled = settings.get(KEY_ENABLED, 'false') == 'true'
 
-        live_active = settings.get(KEY_LIVE_ACTIVE) == 'true'
-        live_mins = int(settings.get(KEY_LIVE_MINUTES, '0')) if live_active else 0
+        app_running = is_pedro_process_running()
+        active_log = _resolve_active_log(self._leveldb_dir)
+        log_mtime = os.path.getmtime(active_log) if (active_log and os.path.exists(active_log)) else 0.0
+        log_age = time.time() - log_mtime
+        timer_active = app_running and (log_age <= 110.0)
+
+        today_dt = datetime.date.today()
+        today_str = today_dt.isoformat()
+        start_of_week = (today_dt - datetime.timedelta(days=today_dt.weekday())).isoformat()
+        end_of_week = (today_dt + datetime.timedelta(days=6 - today_dt.weekday())).isoformat()
+        start_of_month = f"{today_dt.year:04d}-{today_dt.month:02d}-01"
+
+        base_filter = "AND (deleted_at IS NULL OR deleted_at = '') AND source = 'Pomodoro'"
 
         try:
-            today_str = datetime.date.today().isoformat()
-            today_dt = datetime.date.today()
-            week_start = (today_dt - datetime.timedelta(days=today_dt.weekday())).isoformat()
-            week_end = (today_dt + datetime.timedelta(days=6 - today_dt.weekday())).isoformat()
-            month_start = today_dt.replace(day=1).isoformat()
-            activation_ts = settings.get(KEY_ACTIVATED_AT, '')
-
             conn = self.db.get_connection()
             c = conn.cursor()
 
-            base_filter = "AND (deleted_at IS NULL OR deleted_at = '') AND (client_id IS NULL OR client_id NOT LIKE 'pch_%') AND (external_session_id IS NULL OR external_session_id NOT LIKE 'pch_%')"
+            today_mins = c.execute(f"SELECT SUM(duration_minutes) FROM study_sessions WHERE date = ? {base_filter};", (today_str,)).fetchone()[0] or 0.0
+            week_mins = c.execute(f"SELECT SUM(duration_minutes) FROM study_sessions WHERE date >= ? AND date <= ? {base_filter};", (start_of_week, end_of_week)).fetchone()[0] or 0.0
+            month_mins = c.execute(f"SELECT SUM(duration_minutes) FROM study_sessions WHERE date >= ? {base_filter};", (start_of_month,)).fetchone()[0] or 0.0
+            total_mins = c.execute(f"SELECT SUM(duration_minutes) FROM study_sessions WHERE 1=1 {base_filter};").fetchone()[0] or 0.0
 
-            if activation_ts:
-                activation_date = activation_ts[:10]
-                total_mins = c.execute(
-                    f"SELECT SUM(duration_minutes) FROM study_sessions "
-                    f"WHERE source = 'Pomodoro' AND date >= ? {base_filter};",
-                    (activation_date,)
-                ).fetchone()[0] or 0.0
-                total_focus_count = c.execute(
-                    f"SELECT COUNT(*) FROM study_sessions "
-                    f"WHERE source = 'Pomodoro' AND date >= ? {base_filter};",
-                    (activation_date,)
-                ).fetchone()[0] or 0
-            else:
-                total_mins = c.execute(
-                    f"SELECT SUM(duration_minutes) FROM study_sessions WHERE source = 'Pomodoro' {base_filter};"
-                ).fetchone()[0] or 0.0
-                total_focus_count = c.execute(
-                    f"SELECT COUNT(*) FROM study_sessions WHERE source = 'Pomodoro' {base_filter};"
-                ).fetchone()[0] or 0
-
-            today_mins = c.execute(
-                f"SELECT SUM(duration_minutes) FROM study_sessions "
-                f"WHERE source = 'Pomodoro' AND date = ? {base_filter};",
-                (today_str,)
-            ).fetchone()[0] or 0.0
-
-            week_mins = c.execute(
-                f"SELECT SUM(duration_minutes) FROM study_sessions "
-                f"WHERE source = 'Pomodoro' AND date >= ? AND date <= ? {base_filter};",
-                (week_start, week_end)
-            ).fetchone()[0] or 0.0
-
-            month_mins = c.execute(
-                f"SELECT SUM(duration_minutes) FROM study_sessions "
-                f"WHERE source = 'Pomodoro' AND date >= ? {base_filter};",
-                (month_start,)
-            ).fetchone()[0] or 0.0
+            # Count total focus sessions
+            rows = c.execute(f"SELECT topic, notes FROM study_sessions WHERE 1=1 {base_filter};").fetchall()
+            total_focus_count = 0
+            for r in rows:
+                topic = r['topic'] or ''
+                if topic.startswith('Focus Sessions:'):
+                    try:
+                        total_focus_count += int(topic.replace('Focus Sessions:', '').strip())
+                        continue
+                    except Exception:
+                        pass
+                m = re.search(r'(\d+)\s+focus\s+session', r['notes'] or '')
+                if m:
+                    total_focus_count += int(m.group(1))
+                else:
+                    total_focus_count += 1
 
             conn.close()
         except Exception:
@@ -762,42 +567,25 @@ class PomodoroSyncEngine:
                 return f'{h}h'
             return f'{mm}m'
 
-        raw_status = settings.get(KEY_SYNC_STATUS, 'Not configured')
-        if not enabled:
-            display_status = 'Disabled'
-        elif live_active:
-            display_status = 'Currently Studying'
-        elif 'Waiting' in raw_status:
-            display_status = 'Waiting'
-        elif 'Error' in raw_status:
-            display_status = 'Error'
-        else:
-            display_status = 'Connected'
-
-        today_effective = today_mins + live_mins
-        week_effective = week_mins + live_mins
-        month_effective = month_mins + live_mins
-        total_effective = total_mins + live_mins
+        display_status = 'Disabled' if not enabled else ('Currently Studying' if timer_active else 'Connected')
 
         return {
             'enabled': enabled,
             'status': display_status,
-            'status_detail': raw_status,
-            'is_live': live_active,
-            'live_minutes': live_mins,
-            'live_str': f"{live_mins}m elapsed" if live_mins > 0 else "Active",
+            'status_detail': display_status,
+            'is_live': timer_active,
+            'live_minutes': int(round(today_mins)) if timer_active else 0,
+            'live_str': f"{int(round(today_mins))}m elapsed" if timer_active else "Idle",
             'activated_at': settings.get(KEY_ACTIVATED_AT, ''),
             'last_sync': settings.get(KEY_LAST_SYNC, 'Never'),
-            'baseline_minutes': int(settings.get(KEY_BASELINE_MINUTES, 0)),
-            'baseline_focus': int(settings.get(KEY_BASELINE_FOCUS, 0)),
-            'today_minutes': int(round(today_effective)),
-            'today_formatted': _fmt(today_effective),
-            'week_minutes': int(round(week_effective)),
-            'week_formatted': _fmt(week_effective),
-            'month_minutes': int(round(month_effective)),
-            'month_formatted': _fmt(month_effective),
-            'total_minutes': int(round(total_effective)),
-            'total_formatted': _fmt(total_effective),
+            'today_minutes': int(round(today_mins)),
+            'today_formatted': _fmt(today_mins),
+            'week_minutes': int(round(week_mins)),
+            'week_formatted': _fmt(week_mins),
+            'month_minutes': int(round(month_mins)),
+            'month_formatted': _fmt(month_mins),
+            'total_minutes': int(round(total_mins)),
+            'total_formatted': _fmt(total_mins),
             'total_sessions_imported': total_focus_count,
             'is_configured': enabled,
             'data_source': 'Study Pomodoro (LevelDB)' if enabled else 'Not configured',
@@ -809,17 +597,14 @@ class PomodoroSyncEngine:
     # -----------------------------------------------------------------------
 
     def _watcher_loop(self) -> None:
-        """
-        Background daemon thread.
-        Polls every 2 seconds to detect live timer writes and session state changes.
-        Never crashes AAYUSH 360.
-        """
-        POLL_INTERVAL_SECONDS = 2.0
+        """Background daemon thread. Periodically updates live study duration when Pedro is running."""
+        POLL_INTERVAL_SECONDS = 5.0
         while not self._stop_event.is_set():
             try:
                 settings = self._get_settings()
                 if settings.get(KEY_ENABLED, 'false') == 'true':
-                    self._check_sync_and_live()
+                    if is_pedro_process_running():
+                        self.sync_from_source(push_cloud=False)
             except Exception:
                 pass
             self._stop_event.wait(POLL_INTERVAL_SECONDS)

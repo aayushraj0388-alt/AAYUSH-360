@@ -520,6 +520,34 @@ class CloudSyncEngine:
                 conn.execute(f"UPDATE revisions SET sync_status = 'synced' WHERE client_id IN ({placeholders})", pushed_cids)
                 total_pushed += len(payload)
 
+            # 8. WEEKLY TARGET COMPLETIONS
+            cur = conn.execute("SELECT * FROM weekly_target_completions WHERE sync_status = 'pending'")
+            wtc_rows = [dict(r) for r in cur.fetchall()]
+            if wtc_rows:
+                pushed_cids = [r["client_id"] for r in wtc_rows]
+                try:
+                    prof_res = self._client.table("profiles").select("settings").eq("id", user_id).execute()
+                    prof_settings = prof_res.data[0].get("settings") or {} if prof_res.data else {}
+                    existing_wtc = prof_settings.get("weekly_target_completions") or []
+                    wtc_map = {item["client_id"]: item for item in existing_wtc}
+                    for r in wtc_rows:
+                        wtc_map[r["client_id"]] = {
+                            "client_id": r["client_id"],
+                            "week_start": r["week_start"],
+                            "lecture_client_id": r["lecture_client_id"],
+                            "subject_client_id": r["subject_client_id"],
+                            "completed_at": r["completed_at"],
+                            "updated_at": r["updated_at"],
+                            "deleted_at": r.get("deleted_at")
+                        }
+                    prof_settings["weekly_target_completions"] = list(wtc_map.values())
+                    self._client.table("profiles").upsert({"id": user_id, "settings": prof_settings}).execute()
+                    placeholders = ','.join('?' * len(pushed_cids))
+                    conn.execute(f"UPDATE weekly_target_completions SET sync_status = 'synced' WHERE client_id IN ({placeholders})", pushed_cids)
+                    total_pushed += len(wtc_rows)
+                except Exception as wtc_err:
+                    print(f"[CloudSync] Push weekly_target_completions warning: {wtc_err}")
+
             conn.commit()
             return total_pushed
 
@@ -602,6 +630,18 @@ class CloudSyncEngine:
             if res.data:
                 self.db.merge_cloud_revisions(res.data)
                 total_pulled += len(res.data)
+
+            # 8. PULL WEEKLY TARGET COMPLETIONS
+            try:
+                prof_res = self._client.table("profiles").select("settings").eq("id", user_id).execute()
+                if prof_res.data:
+                    prof_settings = prof_res.data[0].get("settings") or {}
+                    cloud_wtc = prof_settings.get("weekly_target_completions") or []
+                    if cloud_wtc:
+                        self.db.merge_cloud_weekly_target_completions(cloud_wtc)
+                        total_pulled += len(cloud_wtc)
+            except Exception as wtc_pull_err:
+                print(f"[CloudSync] Pull weekly_target_completions warning: {wtc_pull_err}")
 
             return total_pulled
 

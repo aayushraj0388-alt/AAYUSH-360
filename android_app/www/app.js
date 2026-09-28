@@ -1103,10 +1103,9 @@ function triggerDebouncedAutoSync() {
 
 async function calculateStudyAnalytics(timeFilter = 'all_time') {
   const sessions = await dbGetAll('study_sessions');
-  // Pomodoro sessions only (exclude Physical Chemistry syllabus tracking hours)
+  // Pomodoro sessions only (strictly source === 'Pomodoro')
   const activeSessions = sessions.filter(s => 
-    !s.deleted_at && 
-    (s.source === 'Pomodoro' || (s.subject !== 'Physical Chemistry' && !s.client_id?.startsWith('pch_') && !s.external_session_id?.startsWith('pch_')))
+    !s.deleted_at && s.source === 'Pomodoro'
   );
 
   const todayStr = getTodayDateStr();
@@ -1121,11 +1120,23 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
     return Math.round((Number(s.duration_hours) || 0) * 60);
   };
 
+  const getSessionFocusCount = (s) => {
+    if (s.topic && s.topic.startsWith('Focus Sessions:')) {
+      const num = parseInt(s.topic.replace('Focus Sessions:', '').trim(), 10);
+      if (!isNaN(num)) return num;
+    }
+    const match = (s.notes || '').match(/(\d+)\s+focus\s+session/i);
+    if (match) return parseInt(match[1], 10);
+    return 1;
+  };
+
   // 1. Today
   const todaySessions = activeSessions.filter(s => s.date === todayStr);
   let todayMins = 0;
+  let todayFocusCount = 0;
   todaySessions.forEach(s => {
     todayMins += getSessionMins(s);
+    todayFocusCount += getSessionFocusCount(s);
   });
   const todayHours = Math.round((todayMins / 60) * 100) / 100;
   const todayAvgDur = todaySessions.length > 0 ? Math.round(todayMins / todaySessions.length) : 0;
@@ -1133,9 +1144,11 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
   // 2. Week (Mon - Sun)
   const weekSessions = activeSessions.filter(s => s.date >= weekStart && s.date <= weekEnd);
   let weekMins = 0;
+  let weekFocusCount = 0;
   const weekDatesSet = new Set();
   weekSessions.forEach(s => {
     weekMins += getSessionMins(s);
+    weekFocusCount += getSessionFocusCount(s);
     if (s.date) weekDatesSet.add(s.date);
   });
   const weekHours = Math.round((weekMins / 60) * 100) / 100;
@@ -1144,9 +1157,11 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
   // 3. Month
   const monthSessions = activeSessions.filter(s => s.date >= monthStart);
   let monthMins = 0;
+  let monthFocusCount = 0;
   const monthDatesSet = new Set();
   monthSessions.forEach(s => {
     monthMins += getSessionMins(s);
+    monthFocusCount += getSessionFocusCount(s);
     if (s.date) monthDatesSet.add(s.date);
   });
   const monthHours = Math.round((monthMins / 60) * 100) / 100;
@@ -1154,9 +1169,11 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
 
   // 4. Total All-Time
   let totalMins = 0;
+  let totalFocusCount = 0;
   const allDatesSet = new Set();
   activeSessions.forEach(s => {
     totalMins += getSessionMins(s);
+    totalFocusCount += getSessionFocusCount(s);
     if (s.date) allDatesSet.add(s.date);
   });
   const totalHours = Math.round((totalMins / 60) * 100) / 100;
@@ -1321,7 +1338,7 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
       hours: todayHours,
       minutes: todayMins,
       formatted: formatMinutesStr(todayMins),
-      sessions: todaySessions.length,
+      sessions: todayFocusCount,
       avg_duration: formatMinutesStr(todayAvgDur)
     },
     week_summary: {
@@ -1329,21 +1346,21 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
       minutes: weekMins,
       formatted: formatMinutesStr(weekMins),
       days_studied: weekDaysStudied,
-      sessions: weekSessions.length
+      sessions: weekFocusCount
     },
     month_summary: {
       hours: monthHours,
       minutes: monthMins,
       formatted: formatMinutesStr(monthMins),
       days_studied: monthDaysStudied,
-      sessions: monthSessions.length
+      sessions: monthFocusCount
     },
     total_summary: {
       hours: totalHours,
       minutes: totalMins,
       formatted: formatMinutesStr(totalMins),
       days_studied: totalDaysStudied,
-      sessions: activeSessions.length
+      sessions: totalFocusCount
     },
     week_days: weekDays,
     consistency: {
@@ -2884,12 +2901,13 @@ async function renderAnalyticsView() {
           ((l.completed_at && l.completed_at >= weekStart && l.completed_at <= weekEnd + 'T23:59:59') || (l.scheduled_date >= weekStart && l.scheduled_date <= weekEnd))
         ).length;
       } else {
-        const pSessions = (studyData.recent_sessions || []).filter(s => 
-          (s.subject.includes('Physical') || s.subject === 'Physical Chemistry') &&
+        const pSessions = (studySessions || []).filter(s => 
+          !s.deleted_at &&
+          (s.source === 'Physical Chemistry' || s.client_id?.startsWith('pch_') || s.external_session_id?.startsWith('pch_') || s.subject === 'Physical Chemistry') &&
           s.date >= weekStart && s.date <= weekEnd
         );
         let ph = 0;
-        pSessions.forEach(s => ph += (Number(s.duration_hours) || 0));
+        pSessions.forEach(s => ph += (Number(s.duration_hours) || (Number(s.duration_minutes) || 0) / 60));
         achieved = Math.round(ph * 10) / 10;
       }
       const pct = targetVal > 0 ? Math.min(100, Math.round((achieved / targetVal) * 100)) : 0;
