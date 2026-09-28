@@ -47,33 +47,50 @@
   <main class="main-content flex-1 px-4 py-3 space-y-4">
 
     <!-- ==================== VIEW 1: DASHBOARD ==================== -->
-    <section id="view-dashboard" class="space-y-4">
+    <section id="view-dashboard" class="space-y-3.5">
       <!-- Greeting Banner -->
-      <div class="touch-card bg-gradient-to-br from-indigo-600 to-blue-700 text-white p-5 rounded-2xl shadow-lg shadow-indigo-600/15">
+      <div class="touch-card bg-gradient-to-br from-indigo-700 via-indigo-600 to-blue-600 text-white p-4 rounded-2xl shadow-md shadow-indigo-700/20">
         <div class="flex items-center justify-between">
           <div>
-            <div class="text-xs font-medium text-indigo-100 uppercase tracking-wider">JEE 2026-2027</div>
-            <h1 class="text-xl font-black mt-0.5" id="dash-greeting">Welcome back, Aayush</h1>
+            <div class="flex items-center gap-1.5 text-[11px] font-bold text-indigo-200 uppercase tracking-wider">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>JEE Command Center</span>
+            </div>
+            <h1 class="text-xl font-black mt-1 text-white tracking-tight" id="dash-greeting">Good Afternoon, Aayush</h1>
           </div>
           <div class="text-right">
-            <span id="dash-date-pill" class="text-[11px] bg-white/20 backdrop-blur-md px-2.5 py-1 rounded-lg font-bold">Today</span>
+            <span id="dash-date-pill" class="text-xs bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-xl font-extrabold text-white border border-white/20 shadow-xs">Today</span>
           </div>
         </div>
+      </div>
 
-        <!-- Macro Stats Row -->
-        <div class="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-white/20 text-center">
-          <div class="bg-white/10 rounded-xl p-2">
-            <div class="text-lg font-black" id="dash-lectures-completed">0/398</div>
-            <div class="text-[10px] text-indigo-100 font-medium">Lectures Done</div>
+      <!-- High-Contrast Macro Stats Grid (Requirement B) -->
+      <div class="grid grid-cols-3 gap-2.5">
+        <!-- Lectures Done -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-xs flex flex-col justify-between">
+          <div>
+            <div class="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">Lectures</div>
+            <div class="text-lg font-black text-indigo-700 mt-0.5" id="dash-lectures-completed">0/398</div>
           </div>
-          <div class="bg-white/10 rounded-xl p-2">
-            <div class="text-lg font-black" id="dash-overall-progress">0%</div>
-            <div class="text-[10px] text-indigo-100 font-medium">Syllabus</div>
+          <div class="text-[10px] font-extrabold text-indigo-600 bg-indigo-50 rounded-md py-0.5 mt-1" id="dash-lectures-pct">0% Done</div>
+        </div>
+
+        <!-- Syllabus Progress -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-xs flex flex-col justify-between">
+          <div>
+            <div class="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">Syllabus</div>
+            <div class="text-lg font-black text-emerald-700 mt-0.5" id="dash-overall-progress">0%</div>
           </div>
-          <div class="bg-white/10 rounded-xl p-2">
-            <div class="text-lg font-black" id="dash-tests-done">0</div>
-            <div class="text-[10px] text-indigo-100 font-medium">Tests Given</div>
+          <div class="text-[10px] font-extrabold text-emerald-600 bg-emerald-50 rounded-md py-0.5 mt-1" id="dash-syllabus-detail">Overall</div>
+        </div>
+
+        <!-- Tests Given -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-xs flex flex-col justify-between">
+          <div>
+            <div class="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">Tests Given</div>
+            <div class="text-lg font-black text-purple-700 mt-0.5" id="dash-tests-done">0</div>
           </div>
+          <div class="text-[10px] font-extrabold text-purple-600 bg-purple-50 rounded-md py-0.5 mt-1" id="dash-tests-status">0 Completed</div>
         </div>
       </div>
 
@@ -93,74 +110,193 @@
         </button>
       </div>
 
-      <!-- 1. Study Time / Focus Card (Pomodoro Sync) -->
-      <div id="dash-study-time-card" class="card-amber p-4 space-y-3">
+      <!-- 1. Pomodoro / Study Time Analytics Card (Requirement C) -->
+      <div id="dash-study-time-card" class="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-white border-2 border-amber-300/80 rounded-2xl p-4 space-y-3 shadow-xs">
         <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <div class="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-900 flex items-center justify-center font-bold">
-              <i data-lucide="clock" class="w-4 h-4 text-amber-700"></i>
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-black shadow-xs">
+              <i data-lucide="clock" class="w-4 h-4"></i>
             </div>
             <div>
-              <h2 class="text-xs font-black text-amber-950 uppercase tracking-wider">Study Time & Focus</h2>
-              <div class="text-[10px] text-amber-800 font-semibold" id="dash-pomo-status">Synced from Pomodoro</div>
+              <h2 class="text-xs font-black text-slate-900 uppercase tracking-wider">Pomodoro Focus Time</h2>
+              <div class="flex items-center gap-1 text-[10px] font-bold text-amber-900" id="dash-pomo-status">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span>Synced from Pomodoro</span>
+              </div>
             </div>
           </div>
-          <button onclick="switchView('analytics', 'study_time')" class="text-xs font-bold text-amber-900 flex items-center gap-1">
+          <button onclick="switchView('analytics', 'study_time')" class="px-2.5 py-1 rounded-lg bg-amber-100/80 border border-amber-300 text-xs font-black text-amber-950 flex items-center gap-1 active:scale-95">
             <span>Analytics</span>
             <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
           </button>
         </div>
 
-        <div class="grid grid-cols-3 gap-2 text-center pt-1 border-t border-amber-200/60">
-          <div class="bg-white/60 rounded-xl p-2 border border-amber-200/50">
-            <div class="text-base font-black text-amber-950" id="dash-study-today">0h</div>
-            <div class="text-[10px] text-amber-800 font-medium">Today</div>
+        <!-- Target & Progress -->
+        <div class="space-y-1.5 pt-1">
+          <div class="flex justify-between items-baseline">
+            <span class="text-2xl font-black text-slate-900" id="dash-study-today">0h</span>
+            <span class="text-xs font-black text-amber-900" id="dash-study-target-text">Daily Target: 6h (0%)</span>
           </div>
-          <div class="bg-white/60 rounded-xl p-2 border border-amber-200/50">
-            <div class="text-base font-black text-amber-950" id="dash-study-week">0h</div>
-            <div class="text-[10px] text-amber-800 font-medium">This Week</div>
+          <div class="w-full h-3 bg-amber-100 rounded-full overflow-hidden p-0.5 border border-amber-200">
+            <div id="dash-study-progress-bar" class="h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-600 transition-all duration-500" style="width: 0%;"></div>
           </div>
-          <div class="bg-white/60 rounded-xl p-2 border border-amber-200/50">
-            <div class="text-base font-black text-amber-950" id="dash-study-month">0h</div>
-            <div class="text-[10px] text-amber-800 font-medium">This Month</div>
+        </div>
+
+        <!-- 3 High-Contrast Pills -->
+        <div class="grid grid-cols-3 gap-2 text-center pt-2 border-t border-amber-200">
+          <div class="bg-white rounded-xl p-2.5 border border-slate-200 shadow-2xs">
+            <div class="text-xs font-bold text-slate-600">Today</div>
+            <div class="text-sm font-black text-slate-900 mt-0.5" id="dash-study-today-sub">0h</div>
+          </div>
+          <div class="bg-white rounded-xl p-2.5 border border-slate-200 shadow-2xs">
+            <div class="text-xs font-bold text-slate-600">This Week</div>
+            <div class="text-sm font-black text-slate-900 mt-0.5" id="dash-study-week">0h</div>
+          </div>
+          <div class="bg-white rounded-xl p-2.5 border border-slate-200 shadow-2xs">
+            <div class="text-xs font-bold text-slate-600">Sessions</div>
+            <div class="text-sm font-black text-slate-900 mt-0.5" id="dash-study-sessions">0</div>
           </div>
         </div>
       </div>
 
-      <!-- 2. Weekly Targets Quota Card -->
-      <div class="touch-card space-y-3">
+      <!-- 2. Lecture Velocity & Analytics Card (Requirement D) -->
+      <div class="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-xs">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <i data-lucide="target" class="w-4 h-4 text-emerald-600"></i>
-            <h2 class="font-extrabold text-sm text-slate-800">Weekly Target Quota</h2>
+            <div class="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+              <i data-lucide="play-circle" class="w-4 h-4"></i>
+            </div>
+            <h2 class="font-extrabold text-sm text-slate-900">Lecture Analytics</h2>
           </div>
-          <span id="dash-week-label" class="pill bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px]">Current Week</span>
+          <button onclick="switchView('lectures')" class="text-xs font-bold text-indigo-600 flex items-center gap-0.5">
+            <span>View All</span>
+            <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+          </button>
         </div>
 
-        <div id="dash-weekly-targets-list" class="space-y-2.5">
+        <div class="grid grid-cols-2 gap-2 text-center">
+          <div class="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5">
+            <div class="text-[11px] font-bold text-slate-600">Done Today</div>
+            <div class="text-base font-black text-indigo-700 mt-0.5" id="dash-lec-today">0 lecs</div>
+          </div>
+          <div class="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5">
+            <div class="text-[11px] font-bold text-slate-600">Done This Week</div>
+            <div class="text-base font-black text-indigo-700 mt-0.5" id="dash-lec-week">0 lecs</div>
+          </div>
+          <div class="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5">
+            <div class="text-[11px] font-bold text-slate-600">Total Completed</div>
+            <div class="text-base font-black text-slate-900 mt-0.5" id="dash-lec-total">0/398</div>
+          </div>
+          <div class="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5">
+            <div class="text-[11px] font-bold text-slate-600">Lecture Progress</div>
+            <div class="text-base font-black text-emerald-700 mt-0.5" id="dash-lec-pct">0%</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Weekly Activity Overview (Mon - Sun Bars) (Requirement F) -->
+      <div class="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-xs">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-7 h-7 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center font-bold">
+              <i data-lucide="bar-chart" class="w-4 h-4"></i>
+            </div>
+            <h2 class="font-extrabold text-sm text-slate-900">Weekly Study Activity</h2>
+          </div>
+          <span id="dash-weekly-total-hours" class="pill bg-sky-50 text-sky-800 border border-sky-200 text-xs font-black">0h this week</span>
+        </div>
+
+        <!-- 7-day Monday-Sunday bars -->
+        <div id="dash-weekly-activity-bars" class="grid grid-cols-7 gap-1 pt-2">
+          <!-- Populated dynamically: Mon to Sun -->
+        </div>
+      </div>
+
+      <!-- 4. Weekly Target Quota Card (Requirement H) -->
+      <div class="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-xs">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+              <i data-lucide="target" class="w-4 h-4"></i>
+            </div>
+            <h2 class="font-extrabold text-sm text-slate-900">Weekly Target Quota</h2>
+          </div>
+          <span id="dash-week-label" class="pill bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-extrabold">Current Week</span>
+        </div>
+
+        <!-- Weekly Quota Macro Summary -->
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+          <div class="flex justify-between items-baseline text-xs font-black">
+            <span class="text-slate-700">Weekly Goal Progress</span>
+            <span class="text-emerald-700" id="dash-weekly-pct-total">0%</span>
+          </div>
+          <div class="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
+            <div id="dash-weekly-progress-bar" class="h-full rounded-full bg-emerald-600 transition-all duration-300" style="width: 0%;"></div>
+          </div>
+          <div class="grid grid-cols-3 gap-1 text-center pt-1 text-xs">
+            <div>
+              <div class="text-[10px] font-bold text-slate-500">Target</div>
+              <div class="font-black text-slate-800" id="dash-weekly-target-total">0</div>
+            </div>
+            <div>
+              <div class="text-[10px] font-bold text-slate-500">Done</div>
+              <div class="font-black text-emerald-700" id="dash-weekly-completed-total">0</div>
+            </div>
+            <div>
+              <div class="text-[10px] font-bold text-slate-500">Remaining</div>
+              <div class="font-black text-amber-700" id="dash-weekly-remaining-total">0</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Subject Targets List -->
+        <div id="dash-weekly-targets-list" class="space-y-2.5 pt-1">
           <!-- Populated dynamically -->
         </div>
       </div>
 
-      <!-- 3. Upcoming JEE Test Card -->
-      <div id="dash-upcoming-test-card" class="touch-card p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200 space-y-2.5">
+      <!-- 5. JEE Test Analytics & Upcoming Test (Requirement E) -->
+      <div class="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-xs">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <div class="w-7 h-7 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
               <i data-lucide="award" class="w-4 h-4"></i>
             </div>
-            <div>
-              <span class="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-purple-200 text-purple-900" id="dash-test-pill-type">JEE Main</span>
-              <h3 class="text-xs font-black text-slate-900 mt-0.5" id="dash-test-name">Test 01</h3>
-            </div>
+            <h2 class="font-extrabold text-sm text-slate-900">JEE Test Analytics</h2>
           </div>
-          <div class="text-right">
-            <span class="text-xs font-black text-purple-700" id="dash-test-days-left">In -- days</span>
-            <div class="text-[10px] text-slate-500" id="dash-test-date">--</div>
+          <button onclick="openAddTestModal()" class="text-xs font-bold text-purple-700 flex items-center gap-1">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            <span>Log Test</span>
+          </button>
+        </div>
+
+        <!-- Test Metrics -->
+        <div class="grid grid-cols-2 gap-2 text-center">
+          <div class="bg-purple-50/60 border border-purple-100 rounded-xl p-2.5">
+            <div class="text-[11px] font-bold text-slate-600">Completed Tests</div>
+            <div class="text-base font-black text-purple-700 mt-0.5" id="dash-test-completed-count">0</div>
+          </div>
+          <div class="bg-purple-50/60 border border-purple-100 rounded-xl p-2.5">
+            <div class="text-[11px] font-bold text-slate-600">Performance Status</div>
+            <div class="text-base font-black text-purple-700 mt-0.5" id="dash-test-avg-score">Up to date</div>
           </div>
         </div>
-        <div class="text-[11px] text-slate-600 bg-white/70 p-2 rounded-xl border border-purple-100" id="dash-test-syllabus">
-          Syllabus: Physics, Chemistry & Maths
+
+        <!-- Upcoming Test Preview -->
+        <div id="dash-upcoming-test-card" class="p-3 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-xl space-y-2">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-purple-200 text-purple-900" id="dash-test-pill-type">JEE Main</span>
+              <h3 class="text-xs font-black text-slate-900" id="dash-test-name">Test 01</h3>
+            </div>
+            <div class="text-right">
+              <span class="text-xs font-black text-purple-700" id="dash-test-days-left">In -- days</span>
+              <div class="text-[10px] font-bold text-slate-500" id="dash-test-date">--</div>
+            </div>
+          </div>
+          <div class="text-[11px] text-slate-700 bg-white/80 p-2 rounded-lg border border-purple-100" id="dash-test-syllabus">
+            Syllabus: Physics, Chemistry & Maths
+          </div>
         </div>
       </div>
 
@@ -178,22 +314,6 @@
           <i data-lucide="award" class="w-4 h-4"></i>
           <span>Log Test</span>
         </button>
-      </div>
-
-
-      <!-- Today's Schedule & Targets -->
-      <div class="touch-card space-y-3">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <i data-lucide="calendar-check" class="w-4 h-4 text-indigo-600"></i>
-            <h2 class="font-extrabold text-sm text-slate-800">Today's Target Schedule</h2>
-          </div>
-          <span id="dash-today-count" class="pill bg-indigo-50 text-indigo-700 border border-indigo-200">0 Tasks</span>
-        </div>
-
-        <div id="dash-today-list" class="space-y-2">
-          <div class="text-center py-6 text-slate-400 text-xs">Loading today's schedule...</div>
-        </div>
       </div>
 
       <!-- Subject Progress Overview -->

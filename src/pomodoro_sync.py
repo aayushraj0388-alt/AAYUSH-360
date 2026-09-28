@@ -306,18 +306,21 @@ class PomodoroSyncEngine:
                 notes += f", {focus_count} completed focus interval{'s' if focus_count > 1 else ''}"
             notes += ")"
 
+            import uuid
+            cid = str(uuid.uuid4())
             conn = self.db.get_connection()
             c = conn.cursor()
             c.execute("""
                 INSERT INTO study_sessions (
                     source, external_session_id, date, start_time, end_time,
                     duration_minutes, duration_hours, subject, chapter, topic,
-                    activity, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    activity, notes, client_id, sync_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 ON CONFLICT(source, external_session_id) DO UPDATE SET
                     duration_minutes = excluded.duration_minutes,
                     duration_hours   = excluded.duration_hours,
                     notes            = excluded.notes,
+                    sync_status      = 'pending',
                     updated_at       = datetime('now', 'localtime');
             """, (
                 'Pomodoro',
@@ -331,7 +334,8 @@ class PomodoroSyncEngine:
                 '',
                 '',
                 'Other',
-                notes
+                notes,
+                cid
             ))
             conn.commit()
             conn.close()

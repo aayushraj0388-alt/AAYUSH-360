@@ -1046,50 +1046,63 @@ function triggerDebouncedAutoSync() {
 
 async function calculateStudyAnalytics(timeFilter = 'all_time') {
   const sessions = await dbGetAll('study_sessions');
-  const activeSessions = sessions.filter(s => !s.deleted_at);
+  // Pomodoro sessions only (exclude Physical Chemistry syllabus tracking hours)
+  const activeSessions = sessions.filter(s => 
+    !s.deleted_at && 
+    (s.source === 'Pomodoro' || (s.subject !== 'Physical Chemistry' && !s.client_id?.startsWith('pch_')))
+  );
 
   const todayStr = getTodayDateStr();
   const { weekStart, weekEnd } = getWeekDateRange(todayStr);
   const curDate = new Date();
   const monthStart = `${curDate.getFullYear()}-${String(curDate.getMonth() + 1).padStart(2, '0')}-01`;
 
+  const getSessionMins = (s) => {
+    if (s.duration_minutes != null && Number(s.duration_minutes) > 0) {
+      return Number(s.duration_minutes);
+    }
+    return Math.round((Number(s.duration_hours) || 0) * 60);
+  };
+
   // 1. Today
   const todaySessions = activeSessions.filter(s => s.date === todayStr);
-  let todayHours = 0;
   let todayMins = 0;
   todaySessions.forEach(s => {
-    todayHours += (Number(s.duration_hours) || 0);
-    todayMins += (Number(s.duration_minutes) || 0);
+    todayMins += getSessionMins(s);
   });
+  const todayHours = Math.round((todayMins / 60) * 100) / 100;
   const todayAvgDur = todaySessions.length > 0 ? Math.round(todayMins / todaySessions.length) : 0;
 
   // 2. Week (Mon - Sun)
   const weekSessions = activeSessions.filter(s => s.date >= weekStart && s.date <= weekEnd);
-  let weekHours = 0;
+  let weekMins = 0;
   const weekDatesSet = new Set();
   weekSessions.forEach(s => {
-    weekHours += (Number(s.duration_hours) || 0);
+    weekMins += getSessionMins(s);
     if (s.date) weekDatesSet.add(s.date);
   });
+  const weekHours = Math.round((weekMins / 60) * 100) / 100;
   const weekDaysStudied = weekDatesSet.size;
 
   // 3. Month
   const monthSessions = activeSessions.filter(s => s.date >= monthStart);
-  let monthHours = 0;
+  let monthMins = 0;
   const monthDatesSet = new Set();
   monthSessions.forEach(s => {
-    monthHours += (Number(s.duration_hours) || 0);
+    monthMins += getSessionMins(s);
     if (s.date) monthDatesSet.add(s.date);
   });
+  const monthHours = Math.round((monthMins / 60) * 100) / 100;
   const monthDaysStudied = monthDatesSet.size;
 
   // 4. Total All-Time
-  let totalHours = 0;
+  let totalMins = 0;
   const allDatesSet = new Set();
   activeSessions.forEach(s => {
-    totalHours += (Number(s.duration_hours) || 0);
+    totalMins += getSessionMins(s);
     if (s.date) allDatesSet.add(s.date);
   });
+  const totalHours = Math.round((totalMins / 60) * 100) / 100;
   const totalDaysStudied = allDatesSet.size;
 
   // 5. Streaks
@@ -1119,9 +1132,9 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
     const dStr = dateToStr(dtObj);
 
     const dSessions = activeSessions.filter(s => s.date === dStr);
-    let dh = 0;
-    dSessions.forEach(s => dh += (Number(s.duration_hours) || 0));
-    dh = Math.round(dh * 100) / 100;
+    let dm = 0;
+    dSessions.forEach(s => dm += getSessionMins(s));
+    const dh = Math.round((dm / 60) * 100) / 100;
 
     let level = 0;
     if (dh > 0) {
@@ -1135,13 +1148,35 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
       date: dStr,
       day_name: dayAbbrs[dtObj.getDay()],
       hours: dh,
-      formatted: formatDurationStr(dh),
+      formatted: formatMinutesStr(dm),
       sessions: dSessions.length,
       level: level
     });
   }
 
-  // 7. Time Filter Chart Data
+  // 7. Monday-Sunday Current Week Days Breakdown
+  const weekDays = [];
+  const dayAbbrs7 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const curMon = new Date(weekStart + 'T00:00:00');
+  for (let i = 0; i < 7; i++) {
+    const dt = new Date(curMon);
+    dt.setDate(curMon.getDate() + i);
+    const ds = dateToStr(dt);
+    const dsList = activeSessions.filter(s => s.date === ds);
+    let dm = 0;
+    dsList.forEach(s => dm += getSessionMins(s));
+    weekDays.push({
+      date: ds,
+      dayName: dayAbbrs7[dt.getDay()],
+      minutes: dm,
+      hours: Math.round((dm / 60) * 10) / 10,
+      formatted: formatMinutesStr(dm),
+      isToday: ds === todayStr,
+      sessionsCount: dsList.length
+    });
+  }
+
+  // 8. Time Filter Chart Data
   let chartLabels = [];
   let chartValues = [];
   let filterTotalHours = 0;
@@ -1149,37 +1184,39 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
   if (timeFilter === 'today') {
     if (todaySessions.length > 0) {
       chartLabels = todaySessions.map((s, i) => `#${i + 1} ${s.start_time || ''}`.trim());
-      chartValues = todaySessions.map(s => Math.round((Number(s.duration_hours) || 0) * 100) / 100);
+      chartValues = todaySessions.map(s => Math.round((getSessionMins(s) / 60) * 100) / 100);
       filterTotalHours = todayHours;
     } else {
       chartLabels = ['Today'];
       chartValues = [0];
     }
   } else if (timeFilter === 'this_week') {
-    const mon = new Date(weekStart);
+    const mon = new Date(weekStart + 'T00:00:00');
     for (let i = 0; i < 7; i++) {
       const dt = new Date(mon);
       dt.setDate(mon.getDate() + i);
       const ds = dateToStr(dt);
       const dsList = activeSessions.filter(s => s.date === ds);
-      let h = 0;
-      dsList.forEach(s => h += (Number(s.duration_hours) || 0));
+      let hm = 0;
+      dsList.forEach(s => hm += getSessionMins(s));
+      const h = Math.round((hm / 60) * 100) / 100;
       chartLabels.push(dayAbbrs[dt.getDay()]);
-      chartValues.push(Math.round(h * 100) / 100);
+      chartValues.push(h);
       filterTotalHours += h;
     }
   } else if (timeFilter === 'last_week') {
-    const mon = new Date(weekStart);
+    const mon = new Date(weekStart + 'T00:00:00');
     mon.setDate(mon.getDate() - 7);
     for (let i = 0; i < 7; i++) {
       const dt = new Date(mon);
       dt.setDate(mon.getDate() + i);
       const ds = dateToStr(dt);
       const dsList = activeSessions.filter(s => s.date === ds);
-      let h = 0;
-      dsList.forEach(s => h += (Number(s.duration_hours) || 0));
+      let hm = 0;
+      dsList.forEach(s => hm += getSessionMins(s));
+      const h = Math.round((hm / 60) * 100) / 100;
       chartLabels.push(dayAbbrs[dt.getDay()]);
-      chartValues.push(Math.round(h * 100) / 100);
+      chartValues.push(h);
       filterTotalHours += h;
     }
   } else if (timeFilter === 'last_4_weeks') {
@@ -1188,10 +1225,11 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
       dtObj.setDate(dtObj.getDate() - d);
       const dStr = dateToStr(dtObj);
       const dsList = activeSessions.filter(s => s.date === dStr);
-      let h = 0;
-      dsList.forEach(s => h += (Number(s.duration_hours) || 0));
+      let hm = 0;
+      dsList.forEach(s => hm += getSessionMins(s));
+      const h = Math.round((hm / 60) * 100) / 100;
       chartLabels.push(dStr.slice(5));
-      chartValues.push(Math.round(h * 100) / 100);
+      chartValues.push(h);
       filterTotalHours += h;
     }
   } else {
@@ -1201,13 +1239,13 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
       if (s.date) {
         const mKey = s.date.slice(0, 7);
         const cur = monthMap.get(mKey) || 0;
-        monthMap.set(mKey, cur + (Number(s.duration_hours) || 0));
+        monthMap.set(mKey, cur + getSessionMins(s));
       }
     });
     if (monthMap.size > 0) {
       const sortedKeys = Array.from(monthMap.keys()).sort();
       chartLabels = sortedKeys;
-      chartValues = sortedKeys.map(k => Math.round(monthMap.get(k) * 100) / 100);
+      chartValues = sortedKeys.map(k => Math.round((monthMap.get(k) / 60) * 100) / 100);
       filterTotalHours = totalHours;
     } else {
       chartLabels = ['Total'];
@@ -1215,7 +1253,7 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
     }
   }
 
-  // 8. Recent Sessions (last 20)
+  // 9. Recent Sessions (last 20)
   const recentSessions = [...activeSessions].sort((a, b) => {
     return (b.date || '').localeCompare(a.date || '') || (b.start_time || '').localeCompare(a.start_time || '');
   }).slice(0, 20);
@@ -1223,29 +1261,34 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
   return {
     has_data: activeSessions.length > 0,
     today_summary: {
-      hours: Math.round(todayHours * 100) / 100,
-      formatted: formatDurationStr(todayHours),
+      hours: todayHours,
+      minutes: todayMins,
+      formatted: formatMinutesStr(todayMins),
       sessions: todaySessions.length,
       avg_duration: formatMinutesStr(todayAvgDur)
     },
     week_summary: {
-      hours: Math.round(weekHours * 100) / 100,
-      formatted: formatDurationStr(weekHours),
+      hours: weekHours,
+      minutes: weekMins,
+      formatted: formatMinutesStr(weekMins),
       days_studied: weekDaysStudied,
       sessions: weekSessions.length
     },
     month_summary: {
-      hours: Math.round(monthHours * 100) / 100,
-      formatted: formatDurationStr(monthHours),
+      hours: monthHours,
+      minutes: monthMins,
+      formatted: formatMinutesStr(monthMins),
       days_studied: monthDaysStudied,
       sessions: monthSessions.length
     },
     total_summary: {
-      hours: Math.round(totalHours * 100) / 100,
-      formatted: formatDurationStr(totalHours),
+      hours: totalHours,
+      minutes: totalMins,
+      formatted: formatMinutesStr(totalMins),
       days_studied: totalDaysStudied,
       sessions: activeSessions.length
     },
+    week_days: weekDays,
     consistency: {
       current_streak: currentStreak,
       days_studied: totalDaysStudied,
@@ -1389,9 +1432,13 @@ async function renderDashboard() {
   const studySessions = await dbGetAll('study_sessions');
   const studyData = await calculateStudyAnalytics('all_time');
 
+  const todayStr = getTodayDateStr();
+  const { weekStart, weekEnd } = getWeekDateRange(todayStr);
+
   const activeLectures = lectures.filter(l => !l.deleted_at);
   const totalLectures = activeLectures.length || 398;
   const completedLectures = activeLectures.filter(l => l.is_completed).length;
+  const lecsPct = totalLectures > 0 ? Math.round((completedLectures / totalLectures) * 100) : 0;
 
   // Physical Chemistry hours (68 total hours across 9 chapters)
   const pcSessions = (studySessions || []).filter(s => 
@@ -1406,31 +1453,118 @@ async function renderDashboard() {
   const progressPct = totalUnits > 0 ? Math.round((completedUnits / totalUnits) * 100) : 0;
   const completedTests = tests.filter(t => !t.deleted_at && t.status === 'completed').length;
 
+  // A. Dynamic Greeting & Date
+  const now = new Date();
+  const hour = now.getHours();
+  let greetingTime = 'Good Morning';
+  if (hour >= 12 && hour < 17) greetingTime = 'Good Afternoon';
+  else if (hour >= 17 && hour < 21) greetingTime = 'Good Evening';
+  else if (hour >= 21 || hour < 5) greetingTime = 'Good Night';
+
+  const userName = await getSetting('user_name', 'Aayush');
+  const greetingElem = document.getElementById('dash-greeting');
+  if (greetingElem) greetingElem.textContent = `${greetingTime}, ${userName}`;
+
+  const datePill = document.getElementById('dash-date-pill');
+  if (datePill) {
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    datePill.textContent = `${dayNames[now.getDay()]}, ${now.getDate()} ${monthNames[now.getMonth()]}`;
+  }
+
   // Streak update in header
   const streakCounter = document.getElementById('header-streak-text');
   if (streakCounter) streakCounter.textContent = `${studyData.consistency?.current_streak || 1}d Streak`;
 
-  // Macro stats
+  // B. High-Contrast Macro Stats
   const lecsCompletedElem = document.getElementById('dash-lectures-completed');
   if (lecsCompletedElem) lecsCompletedElem.textContent = `${completedLectures}/${totalLectures}`;
+  const lecsPctElem = document.getElementById('dash-lectures-pct');
+  if (lecsPctElem) lecsPctElem.textContent = `${lecsPct}% Done`;
   
   const overallProgElem = document.getElementById('dash-overall-progress');
   if (overallProgElem) overallProgElem.textContent = `${progressPct}%`;
+  const syllabusDetailElem = document.getElementById('dash-syllabus-detail');
+  if (syllabusDetailElem) syllabusDetailElem.textContent = `${completedUnits}/${totalUnits} Units`;
 
   const testsDoneElem = document.getElementById('dash-tests-done');
   if (testsDoneElem) testsDoneElem.textContent = completedTests;
+  const testsStatusElem = document.getElementById('dash-tests-status');
+  if (testsStatusElem) {
+    const upcomingTestsCount = tests.filter(t => !t.deleted_at && t.test_date >= todayStr && t.status !== 'completed').length;
+    testsStatusElem.textContent = upcomingTestsCount > 0 ? `${upcomingTestsCount} Upcoming` : `${completedTests} Done`;
+  }
 
-  // 1. Study Time Card
+  // C. Pomodoro / Study Time Analytics Card
   const studyTodayElem = document.getElementById('dash-study-today');
-  const studyWeekElem = document.getElementById('dash-study-week');
-  const studyMonthElem = document.getElementById('dash-study-month');
   if (studyTodayElem) studyTodayElem.textContent = studyData.today_summary.formatted;
-  if (studyWeekElem) studyWeekElem.textContent = studyData.week_summary.formatted;
-  if (studyMonthElem) studyMonthElem.textContent = studyData.month_summary.formatted;
+  const studyTodaySubElem = document.getElementById('dash-study-today-sub');
+  if (studyTodaySubElem) studyTodaySubElem.textContent = studyData.today_summary.formatted;
 
-  // 2. Weekly Targets Quota Card
-  const todayStr = getTodayDateStr();
-  const { weekStart, weekEnd } = getWeekDateRange(todayStr);
+  const studyWeekElem = document.getElementById('dash-study-week');
+  if (studyWeekElem) studyWeekElem.textContent = studyData.week_summary.formatted;
+  
+  const studySessionsElem = document.getElementById('dash-study-sessions');
+  if (studySessionsElem) studySessionsElem.textContent = `${studyData.today_summary.sessions} ${studyData.today_summary.sessions === 1 ? 'Session' : 'Sessions'}`;
+
+  // Daily target (6h = 360m)
+  const targetDailyMinutes = 6 * 60;
+  const achievedDailyMinutes = studyData.today_summary.minutes || (studyData.today_summary.hours * 60);
+  const dailyTargetPct = Math.min(100, Math.round((achievedDailyMinutes / targetDailyMinutes) * 100));
+  
+  const studyProgressBar = document.getElementById('dash-study-progress-bar');
+  if (studyProgressBar) studyProgressBar.style.width = `${dailyTargetPct}%`;
+  const studyTargetText = document.getElementById('dash-study-target-text');
+  if (studyTargetText) studyTargetText.textContent = `Daily Target: 6h (${dailyTargetPct}% achieved)`;
+
+  // D. Lecture Analytics Card
+  const todayCompletedLecs = activeLectures.filter(l => 
+    l.is_completed && 
+    ((l.completed_at && l.completed_at.startsWith(todayStr)) || l.scheduled_date === todayStr)
+  ).length;
+
+  const weekCompletedLecs = activeLectures.filter(l => 
+    l.is_completed && 
+    ((l.completed_at && l.completed_at >= weekStart && l.completed_at <= weekEnd + 'T23:59:59') || 
+     (l.scheduled_date >= weekStart && l.scheduled_date <= weekEnd))
+  ).length;
+
+  const lecTodayElem = document.getElementById('dash-lec-today');
+  if (lecTodayElem) lecTodayElem.textContent = `${todayCompletedLecs} lecs`;
+  const lecWeekElem = document.getElementById('dash-lec-week');
+  if (lecWeekElem) lecWeekElem.textContent = `${weekCompletedLecs} lecs`;
+  const lecTotalElem = document.getElementById('dash-lec-total');
+  if (lecTotalElem) lecTotalElem.textContent = `${completedLectures}/${totalLectures}`;
+  const lecPctElem = document.getElementById('dash-lec-pct');
+  if (lecPctElem) lecPctElem.textContent = `${lecsPct}%`;
+
+  // F. Weekly Study Activity (Mon - Sun Bars)
+  const activityContainer = document.getElementById('dash-weekly-activity-bars');
+  if (activityContainer && studyData.week_days) {
+    const maxDayMins = Math.max(...studyData.week_days.map(d => d.minutes), 60);
+    activityContainer.innerHTML = studyData.week_days.map(day => {
+      const heightPct = day.minutes > 0 ? Math.min(100, Math.max(12, Math.round((day.minutes / maxDayMins) * 100))) : 4;
+      const barColor = day.isToday ? 'bg-indigo-600' : (day.minutes > 0 ? 'bg-amber-500' : 'bg-slate-200');
+      const dayPill = day.isToday ? 'bg-indigo-600 text-white rounded px-1' : 'text-slate-500';
+
+      return `
+        <div class="flex flex-col items-center flex-1 min-w-0">
+          <span class="text-[9px] font-bold text-slate-500 mb-1 truncate">${day.formatted !== '0m' ? day.formatted : '-'}</span>
+          <div class="w-full h-24 bg-slate-100 rounded-lg flex items-end justify-center p-1 ${day.isToday ? 'ring-2 ring-indigo-500/30' : ''}">
+            <div class="w-full rounded ${barColor} transition-all duration-300" style="height: ${heightPct}%;"></div>
+          </div>
+          <span class="text-[10px] font-bold mt-1.5 ${dayPill}">${day.dayName}</span>
+        </div>
+      `;
+    }).join('');
+  }
+  const weeklyTotalHours = document.getElementById('dash-weekly-total-hours');
+  if (weeklyTotalHours) weeklyTotalHours.textContent = `${studyData.week_summary.formatted} this week`;
+
+  // H. Weekly Targets Quota Card
+  let totalWeeklyTargetUnits = 0;
+  let totalWeeklyAchievedUnits = 0;
+
   const weeklyTargetsList = document.getElementById('dash-weekly-targets-list');
   if (weeklyTargetsList) {
     weeklyTargetsList.innerHTML = subjects.map(sub => {
@@ -1453,6 +1587,9 @@ async function renderDashboard() {
         ).length;
       }
 
+      totalWeeklyTargetUnits += (targetVal || 0);
+      totalWeeklyAchievedUnits += achievedVal;
+
       const pct = targetVal > 0 ? Math.min(100, Math.round((achievedVal / targetVal) * 100)) : 0;
       const unit = sub.target_type === 'hours' ? 'h' : 'lecs';
 
@@ -1470,7 +1607,35 @@ async function renderDashboard() {
     }).join('');
   }
 
-  // 3. Upcoming JEE Test Card
+  const remainingWeeklyUnits = Math.max(0, totalWeeklyTargetUnits - totalWeeklyAchievedUnits);
+  const weeklyPct = totalWeeklyTargetUnits > 0 ? Math.min(100, Math.round((totalWeeklyAchievedUnits / totalWeeklyTargetUnits) * 100)) : 0;
+
+  const weeklyTargetTotal = document.getElementById('dash-weekly-target-total');
+  if (weeklyTargetTotal) weeklyTargetTotal.textContent = `${totalWeeklyTargetUnits}`;
+  const weeklyCompletedTotal = document.getElementById('dash-weekly-completed-total');
+  if (weeklyCompletedTotal) weeklyCompletedTotal.textContent = `${totalWeeklyAchievedUnits}`;
+  const weeklyRemainingTotal = document.getElementById('dash-weekly-remaining-total');
+  if (weeklyRemainingTotal) weeklyRemainingTotal.textContent = `${remainingWeeklyUnits}`;
+  const weeklyPctTotal = document.getElementById('dash-weekly-pct-total');
+  if (weeklyPctTotal) weeklyPctTotal.textContent = `${weeklyPct}%`;
+  const weeklyProgressBar = document.getElementById('dash-weekly-progress-bar');
+  if (weeklyProgressBar) weeklyProgressBar.style.width = `${weeklyPct}%`;
+
+  // E. JEE Test Analytics & Upcoming Card
+  const testCompletedCount = document.getElementById('dash-test-completed-count');
+  if (testCompletedCount) testCompletedCount.textContent = completedTests;
+
+  const testAvgScore = document.getElementById('dash-test-avg-score');
+  if (testAvgScore) {
+    const scoredTests = tests.filter(t => !t.deleted_at && t.status === 'completed' && t.score != null && t.total_marks > 0);
+    if (scoredTests.length > 0) {
+      const avgPct = Math.round(scoredTests.reduce((acc, t) => acc + (t.score / t.total_marks) * 100, 0) / scoredTests.length);
+      testAvgScore.textContent = `${avgPct}% Avg Score`;
+    } else {
+      testAvgScore.textContent = `${completedTests} Completed`;
+    }
+  }
+
   const activeTests = tests.filter(t => !t.deleted_at && t.test_date >= todayStr && t.status !== 'completed')
                            .sort((a, b) => (a.test_date || '').localeCompare(b.test_date || ''));
   const nextTest = activeTests[0];
@@ -1489,48 +1654,7 @@ async function renderDashboard() {
     }
   }
 
-  // 4. Today's Target Schedule
-  const todayTasks = activeLectures.filter(l => (l.scheduled_date === todayStr || l.rescheduled_date === todayStr));
-  const todayCountBadge = document.getElementById('dash-today-count');
-  if (todayCountBadge) todayCountBadge.textContent = `${todayTasks.length} Tasks`;
-
-  const todayList = document.getElementById('dash-today-list');
-  if (todayList) {
-    if (todayTasks.length === 0) {
-      todayList.innerHTML = `<div class="text-center py-5 text-slate-400 text-xs">No scheduled lectures for today! Great time to study.</div>`;
-    } else {
-      todayList.innerHTML = todayTasks.map(l => {
-        const sub = subjects.find(s => s.client_id === l.subject_client_id);
-        return `
-          <div class="p-2.5 rounded-xl border ${l.is_completed ? 'bg-emerald-50/50 border-emerald-200' : 'bg-white border-slate-200'} flex items-center justify-between gap-2 shadow-2xs">
-            <div class="flex items-center gap-2.5 flex-1 min-w-0">
-              <div onclick="toggleLectureCompletion('${l.client_id}')" class="touch-checkbox ${l.is_completed ? 'checked' : ''}">
-                ${l.is_completed ? '✓' : ''}
-              </div>
-              <div class="min-w-0">
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  <span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded text-white" style="background-color: ${sub ? sub.color : '#4f46e5'}">
-                    ${sub ? (sub.display_name || sub.name).slice(0, 4).toUpperCase() : 'L'}
-                  </span>
-                  <span class="text-xs font-bold ${l.is_completed ? 'line-through text-slate-400' : 'text-slate-800'}">
-                    Lecture ${l.lecture_no}
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div class="flex items-center gap-1 flex-shrink-0">
-              <span class="text-[10px] text-slate-500">DPP</span>
-              <div onclick="toggleDppCompletion('${l.client_id}')" class="touch-checkbox ${l.is_dpp_completed ? 'checked' : ''}">
-                ${l.is_dpp_completed ? '✓' : ''}
-              </div>
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-  }
-
-  // 5. Subject Progress Overview (Includes Physical Chemistry as hours)
+  // Subject Progress Overview (Includes Physical Chemistry as hours)
   const subjectListElem = document.getElementById('dash-subject-progress-list');
   if (subjectListElem) {
     subjectListElem.innerHTML = subjects.map(sub => {
