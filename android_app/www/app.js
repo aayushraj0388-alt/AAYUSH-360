@@ -56,7 +56,7 @@ function formatDurationStr(hours) {
 
 function formatMinutesStr(mins) {
   const totalMins = Math.round(Number(mins) || 0);
-  if (totalMins <= 0) return "0m";
+  if (totalMins <= 0) return "0h";
   const h = Math.floor(totalMins / 60);
   const m = totalMins % 60;
   if (h > 0 && m > 0) return `${h}h ${m}m`;
@@ -64,8 +64,17 @@ function formatMinutesStr(mins) {
   return `${m}m`;
 }
 
+function parseLocalDate(dateStr) {
+  if (!dateStr) return new Date();
+  if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const parts = dateStr.split('-').map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0);
+  }
+  return new Date(dateStr);
+}
+
 function getWeekDateRange(dateStr = null) {
-  const target = dateStr ? new Date(dateStr) : new Date();
+  const target = dateStr ? parseLocalDate(dateStr) : new Date();
   const dayOfWeek = target.getDay(); // 0 is Sun, 1 is Mon
   const diffToMon = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
   
@@ -895,8 +904,10 @@ async function syncNow() {
     console.log(`SYNC SUCCESS: Pushed: ${pushedCount}, Pulled: ${pulledCount}`);
     if (pushedCount > 0 || pulledCount > 0) {
       showToast(`Synced! ↑${pushedCount} ↓${pulledCount}`, 'sync');
-      refreshCurrentView();
+    } else {
+      showToast('All data up to date with cloud', 'success');
     }
+    refreshCurrentView();
   } catch (err) {
     const errMsg = err.message || String(err);
     console.error('SYNC ERROR\nSTAGE: GENERAL\nERROR:', errMsg);
@@ -961,9 +972,9 @@ async function pullStoreChanges(storeName, userId, lastSyncTime) {
   let from = 0;
   const pageSize = 1000;
 
-  // 1-minute safety window against device clock skew
+  // Study sessions are never filtered by clock skew to prevent dropped records across devices
   let bufferedTime = null;
-  if (lastSyncTime) {
+  if (lastSyncTime && storeName !== 'study_sessions') {
     const bufferMs = 60 * 1000;
     bufferedTime = new Date(new Date(lastSyncTime).getTime() - bufferMs).toISOString();
   }
@@ -987,15 +998,35 @@ async function pullStoreChanges(storeName, userId, lastSyncTime) {
     from += pageSize;
   }
 
-
   if (allCloudRows.length === 0) return 0;
 
   const localItems = await dbGetAll(storeName);
-  const localMap = new Map(localItems.map(it => [it.client_id, it]));
+  const localMap = new Map();
+  const externalMap = new Map();
+
+  for (const it of localItems) {
+    if (it.client_id) localMap.set(it.client_id, it);
+    if (storeName === 'study_sessions' && it.external_session_id && it.source) {
+      externalMap.set(`${it.source}_${it.external_session_id}`, it);
+    }
+  }
+
   const toSave = [];
 
   for (const cloudItem of allCloudRows) {
-    const existing = localMap.get(cloudItem.client_id);
+    // Normalize numeric fields for study sessions
+    if (storeName === 'study_sessions') {
+      cloudItem.duration_minutes = Number(cloudItem.duration_minutes) || 0;
+      cloudItem.duration_hours = Number(cloudItem.duration_hours) || (Math.round((cloudItem.duration_minutes / 60) * 100) / 100);
+    }
+
+    let existing = localMap.get(cloudItem.client_id);
+    let matchedByExternal = false;
+    if (!existing && storeName === 'study_sessions' && cloudItem.external_session_id && cloudItem.source) {
+      existing = externalMap.get(`${cloudItem.source}_${cloudItem.external_session_id}`);
+      if (existing) matchedByExternal = true;
+    }
+
     if (!existing) {
       // New from cloud — accept it
       cloudItem.sync_status = 'synced';
@@ -1004,22 +1035,43 @@ async function pullStoreChanges(storeName, userId, lastSyncTime) {
         console.log(`[Sync] NEW from cloud: Lecture ${cloudItem.lecture_no} (${cloudItem.client_id}) completed=${cloudItem.is_completed}`);
       }
     } else {
-      // Conflict resolution:
-      // If local item has pending changes, keep local (it will push next cycle)
-      // UNLESS the local pending change was already pushed this cycle (sync_status would still be pending if push failed)
-      if (existing.sync_status === 'pending') {
-        // Local has unpushed changes — keep local, skip cloud overwrite
-        if (storeName === 'lectures') {
-          console.log(`[Sync] SKIP (local pending): Lecture ${existing.lecture_no} (${cloudItem.client_id}) - local completed=${existing.is_completed}`);
+      if (storeName === 'study_sessions') {
+        // Study session conflict resolution:
+        if (cloudItem.deleted_at) {
+          // Cloud deletion wins
+          existing.deleted_at = cloudItem.deleted_at;
+          existing.sync_status = 'synced';
+          toSave.push(existing);
+          continue;
         }
-        continue;
-      } else {
-        // Local is synced — cloud update is newer, accept it
-        // Preserve local fields that Android may have set that cloud might not have
-        const merged = { ...cloudItem, sync_status: 'synced' };
+
+        if (existing.sync_status === 'pending' && !existing.deleted_at && (Number(existing.duration_minutes) || 0) >= cloudItem.duration_minutes) {
+          // Local has greater or equal pending minutes and is not deleted — keep local
+          continue;
+        }
+
+        // Cloud is newer/greater or local is synced: accept cloudItem
+        if (matchedByExternal && existing.client_id !== cloudItem.client_id) {
+          // Delete old mismatched local ID to avoid duplicates
+          await dbDelete('study_sessions', existing.client_id);
+        }
+        const merged = { ...existing, ...cloudItem, sync_status: 'synced' };
         toSave.push(merged);
-        if (storeName === 'lectures' && cloudItem.is_completed !== existing.is_completed) {
-          console.log(`[Sync] UPDATE from cloud: Lecture ${cloudItem.lecture_no} (${cloudItem.client_id}) completed: ${existing.is_completed} → ${cloudItem.is_completed}`);
+      } else {
+        // Standard conflict resolution:
+        if (existing.sync_status === 'pending') {
+          // Local has unpushed changes — keep local, skip cloud overwrite
+          if (storeName === 'lectures') {
+            console.log(`[Sync] SKIP (local pending): Lecture ${existing.lecture_no} (${cloudItem.client_id}) - local completed=${existing.is_completed}`);
+          }
+          continue;
+        } else {
+          // Local is synced — cloud update is newer, accept it
+          const merged = { ...cloudItem, sync_status: 'synced' };
+          toSave.push(merged);
+          if (storeName === 'lectures' && cloudItem.is_completed !== existing.is_completed) {
+            console.log(`[Sync] UPDATE from cloud: Lecture ${cloudItem.lecture_no} (${cloudItem.client_id}) completed: ${existing.is_completed} → ${cloudItem.is_completed}`);
+          }
         }
       }
     }
@@ -1049,7 +1101,7 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
   // Pomodoro sessions only (exclude Physical Chemistry syllabus tracking hours)
   const activeSessions = sessions.filter(s => 
     !s.deleted_at && 
-    (s.source === 'Pomodoro' || (s.subject !== 'Physical Chemistry' && !s.client_id?.startsWith('pch_')))
+    (s.source === 'Pomodoro' || (s.subject !== 'Physical Chemistry' && !s.client_id?.startsWith('pch_') && !s.external_session_id?.startsWith('pch_')))
   );
 
   const todayStr = getTodayDateStr();
@@ -1157,7 +1209,7 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
   // 7. Monday-Sunday Current Week Days Breakdown
   const weekDays = [];
   const dayAbbrs7 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const curMon = new Date(weekStart + 'T00:00:00');
+  const curMon = parseLocalDate(weekStart);
   for (let i = 0; i < 7; i++) {
     const dt = new Date(curMon);
     dt.setDate(curMon.getDate() + i);
@@ -1191,7 +1243,7 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
       chartValues = [0];
     }
   } else if (timeFilter === 'this_week') {
-    const mon = new Date(weekStart + 'T00:00:00');
+    const mon = parseLocalDate(weekStart);
     for (let i = 0; i < 7; i++) {
       const dt = new Date(mon);
       dt.setDate(mon.getDate() + i);
@@ -1205,7 +1257,7 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
       filterTotalHours += h;
     }
   } else if (timeFilter === 'last_week') {
-    const mon = new Date(weekStart + 'T00:00:00');
+    const mon = parseLocalDate(weekStart);
     mon.setDate(mon.getDate() - 7);
     for (let i = 0; i < 7; i++) {
       const dt = new Date(mon);
@@ -1423,10 +1475,120 @@ async function toggleChapterHour(chapterClientId, hourNo) {
   refreshCurrentView();
 }
 
+// ---------------- DYNAMIC GREETING & MOTIVATION HELPERS ----------------
+function getGreeting(userName = 'Aayush', dateObj = new Date()) {
+  const hour = dateObj.getHours();
+  let timeStr = 'Good morning';
+  let emoji = ' ☀️';
+  if (hour >= 12 && hour < 17) {
+    timeStr = 'Good afternoon';
+    emoji = '';
+  } else if (hour >= 17 && hour < 22) {
+    timeStr = 'Good evening';
+    emoji = '';
+  } else if (hour >= 22 || hour < 5) {
+    timeStr = 'Good night';
+    emoji = '';
+  }
+  return `${timeStr}, ${userName}${emoji}`;
+}
+
+function getWeeklyTargetMotivation({
+  weeklyTarget = 0,
+  weeklyAchieved = 0,
+  weeklyPct = 0,
+  remainingTarget = 0,
+  isAchieved = false,
+  weeklyStudyMinutes = 0,
+  dateObj = new Date()
+}) {
+  // If no target configured or target is 0
+  if (!weeklyTarget || weeklyTarget <= 0) {
+    if (weeklyStudyMinutes > 0) {
+      return {
+        text: "You're making steady progress this week. Set your weekly target to stay focused.",
+        badge: "Study Active",
+        status: "info",
+        icon: "flame"
+      };
+    }
+    return {
+      text: "Set your weekly target to start tracking progress.",
+      badge: "Set Target",
+      status: "info",
+      icon: "target"
+    };
+  }
+
+  // 1. Target already achieved or exceeded
+  if (isAchieved || weeklyPct >= 100 || remainingTarget === 0) {
+    if (weeklyAchieved > weeklyTarget || weeklyPct > 100) {
+      return {
+        text: "You're ahead of your weekly target. Keep the momentum going.",
+        badge: "Ahead of Target",
+        status: "ahead",
+        icon: "trending-up"
+      };
+    }
+    return {
+      text: "Weekly target achieved. Great work.",
+      badge: "Target Achieved",
+      status: "achieved",
+      icon: "award"
+    };
+  }
+
+  // 2. Close to target (within 20% or 2 units left)
+  if (weeklyPct >= 80 || (remainingTarget <= 2 && remainingTarget > 0)) {
+    return {
+      text: "You're close to your weekly target. Keep going.",
+      badge: "Almost There",
+      status: "close",
+      icon: "zap"
+    };
+  }
+
+  // 3. Pace calculation based on current day of week and hour
+  // Mon: day 1, Sun: day 7
+  const day = dateObj.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const dayIndex = day === 0 ? 7 : day;
+  const elapsedFraction = Math.min(1.0, ((dayIndex - 1) + (dateObj.getHours() / 24)) / 7);
+  const expectedPacePct = Math.round(elapsedFraction * 100);
+
+  // Ahead of pace
+  if (weeklyPct >= expectedPacePct + 8 && weeklyAchieved > 0) {
+    return {
+      text: "You're ahead of your weekly target. Keep the momentum going.",
+      badge: "Ahead of Pace",
+      status: "ahead",
+      icon: "trending-up"
+    };
+  }
+
+  // Behind pace
+  if (weeklyPct < expectedPacePct - 15) {
+    return {
+      text: "You're behind your weekly target. Keep pushing.",
+      badge: "Behind Target",
+      status: "behind",
+      icon: "arrow-up-circle"
+    };
+  }
+
+  // On pace
+  return {
+    text: "You're on track with your weekly target. Keep going.",
+    badge: "On Track",
+    status: "on_track",
+    icon: "target"
+  };
+}
+
 // ---------------- DASHBOARD ----------------
 async function renderDashboard() {
   const lectures = await dbGetAll('lectures');
   const subjects = await dbGetAll('subjects');
+  const chapters = await dbGetAll('chapters');
   const tests = await dbGetAll('tests');
   const weeklyTargets = await dbGetAll('weekly_targets');
   const studySessions = await dbGetAll('study_sessions');
@@ -1436,17 +1598,14 @@ async function renderDashboard() {
   const { weekStart, weekEnd } = getWeekDateRange(todayStr);
 
   const activeLectures = lectures.filter(l => !l.deleted_at);
-  const totalLectures = activeLectures.length || 398;
+  const totalLectures = activeLectures.length;
   const completedLectures = activeLectures.filter(l => l.is_completed).length;
   const lecsPct = totalLectures > 0 ? Math.round((completedLectures / totalLectures) * 100) : 0;
 
-  // Physical Chemistry hours (68 total hours across 9 chapters)
-  const pcSessions = (studySessions || []).filter(s => 
-    !s.deleted_at && 
-    (s.subject && (s.subject.includes('Physical') || s.subject === 'Physical Chemistry'))
-  );
-  const pcCompletedHours = pcSessions.length;
-  const pcTotalHours = 68;
+  // Physical Chemistry hours calculation from genuine chapters & session data
+  const pcChapters = chapters.filter(c => !c.deleted_at && (c.subject_client_id === 'subj_physical_chemistry' || c.subject_id === 3));
+  const pcTotalHours = pcChapters.reduce((acc, c) => acc + (Number(c.target_hours) || 0), 0) || (pcChapters.length > 0 ? 68 : 0);
+  const pcCompletedHours = pcChapters.reduce((acc, ch) => acc + getChapterCompletedHours(studySessions, ch).size, 0);
 
   const totalUnits = totalLectures + pcTotalHours;
   const completedUnits = completedLectures + pcCompletedHours;
@@ -1455,15 +1614,15 @@ async function renderDashboard() {
 
   // A. Dynamic Greeting & Date
   const now = new Date();
-  const hour = now.getHours();
-  let greetingTime = 'Good Morning';
-  if (hour >= 12 && hour < 17) greetingTime = 'Good Afternoon';
-  else if (hour >= 17 && hour < 21) greetingTime = 'Good Evening';
-  else if (hour >= 21 || hour < 5) greetingTime = 'Good Night';
+  let userName = await getSetting('user_name', '');
+  if (!userName && currentUser) {
+    userName = currentUser.user_metadata?.full_name || currentUser.user_metadata?.name || (currentUser.email ? currentUser.email.split('@')[0] : '');
+    if (userName) userName = userName.charAt(0).toUpperCase() + userName.slice(1);
+  }
+  if (!userName) userName = 'Aayush';
 
-  const userName = await getSetting('user_name', 'Aayush');
   const greetingElem = document.getElementById('dash-greeting');
-  if (greetingElem) greetingElem.textContent = `${greetingTime}, ${userName}`;
+  if (greetingElem) greetingElem.textContent = getGreeting(userName, now);
 
   const datePill = document.getElementById('dash-date-pill');
   if (datePill) {
@@ -1472,9 +1631,12 @@ async function renderDashboard() {
     datePill.textContent = `${dayNames[now.getDay()]}, ${now.getDate()} ${monthNames[now.getMonth()]}`;
   }
 
-  // Streak update in header
+  // Streak update in header (0d if 0, genuine count)
   const streakCounter = document.getElementById('header-streak-text');
-  if (streakCounter) streakCounter.textContent = `${studyData.consistency?.current_streak || 1}d Streak`;
+  if (streakCounter) {
+    const streak = (studyData.consistency && typeof studyData.consistency.current_streak === 'number') ? studyData.consistency.current_streak : 0;
+    streakCounter.textContent = `${streak}d Streak`;
+  }
 
   // B. High-Contrast Macro Stats
   const lecsCompletedElem = document.getElementById('dash-lectures-completed');
@@ -1497,36 +1659,36 @@ async function renderDashboard() {
 
   // C. Pomodoro / Study Time Analytics Card
   const studyTodayElem = document.getElementById('dash-study-today');
-  if (studyTodayElem) studyTodayElem.textContent = studyData.today_summary.formatted;
+  if (studyTodayElem) studyTodayElem.textContent = formatMinutesStr(studyData.today_summary.minutes);
   const studyTodaySubElem = document.getElementById('dash-study-today-sub');
-  if (studyTodaySubElem) studyTodaySubElem.textContent = studyData.today_summary.formatted;
+  if (studyTodaySubElem) studyTodaySubElem.textContent = formatMinutesStr(studyData.today_summary.minutes);
 
   const studyWeekElem = document.getElementById('dash-study-week');
-  if (studyWeekElem) studyWeekElem.textContent = studyData.week_summary.formatted;
+  if (studyWeekElem) studyWeekElem.textContent = formatMinutesStr(studyData.week_summary.minutes);
   
   const studySessionsElem = document.getElementById('dash-study-sessions');
-  if (studySessionsElem) studySessionsElem.textContent = `${studyData.today_summary.sessions} ${studyData.today_summary.sessions === 1 ? 'Session' : 'Sessions'}`;
+  if (studySessionsElem) studySessionsElem.textContent = studyData.today_summary.sessions;
 
-  // Daily target (6h = 360m)
-  const targetDailyMinutes = 6 * 60;
-  const achievedDailyMinutes = studyData.today_summary.minutes || (studyData.today_summary.hours * 60);
-  const dailyTargetPct = Math.min(100, Math.round((achievedDailyMinutes / targetDailyMinutes) * 100));
+  // Daily target
+  const dailyTargetHours = Number(await getSetting('daily_target_hours', 6)) || 6;
+  const targetDailyMinutes = dailyTargetHours * 60;
+  const achievedDailyMinutes = studyData.today_summary.minutes || 0;
+  const dailyTargetPct = targetDailyMinutes > 0 ? Math.min(100, Math.round((achievedDailyMinutes / targetDailyMinutes) * 100)) : 0;
   
   const studyProgressBar = document.getElementById('dash-study-progress-bar');
   if (studyProgressBar) studyProgressBar.style.width = `${dailyTargetPct}%`;
   const studyTargetText = document.getElementById('dash-study-target-text');
-  if (studyTargetText) studyTargetText.textContent = `Daily Target: 6h (${dailyTargetPct}% achieved)`;
+  if (studyTargetText) studyTargetText.textContent = `Daily Target: ${dailyTargetHours}h (${dailyTargetPct}% achieved)`;
 
   // D. Lecture Analytics Card
   const todayCompletedLecs = activeLectures.filter(l => 
     l.is_completed && 
-    ((l.completed_at && l.completed_at.startsWith(todayStr)) || l.scheduled_date === todayStr)
+    (l.completed_at ? l.completed_at.startsWith(todayStr) : l.scheduled_date === todayStr)
   ).length;
 
   const weekCompletedLecs = activeLectures.filter(l => 
     l.is_completed && 
-    ((l.completed_at && l.completed_at >= weekStart && l.completed_at <= weekEnd + 'T23:59:59') || 
-     (l.scheduled_date >= weekStart && l.scheduled_date <= weekEnd))
+    (l.completed_at ? (l.completed_at >= weekStart && l.completed_at <= weekEnd + 'T23:59:59') : (l.scheduled_date >= weekStart && l.scheduled_date <= weekEnd))
   ).length;
 
   const lecTodayElem = document.getElementById('dash-lec-today');
@@ -1549,7 +1711,7 @@ async function renderDashboard() {
 
       return `
         <div class="flex flex-col items-center flex-1 min-w-0">
-          <span class="text-[9px] font-bold text-slate-500 mb-1 truncate">${day.formatted !== '0m' ? day.formatted : '-'}</span>
+          <span class="text-[9px] font-bold text-slate-500 mb-1 truncate">${day.formatted !== '0h' && day.formatted !== '0m' ? day.formatted : '-'}</span>
           <div class="w-full h-24 bg-slate-100 rounded-lg flex items-end justify-center p-1 ${day.isToday ? 'ring-2 ring-indigo-500/30' : ''}">
             <div class="w-full rounded ${barColor} transition-all duration-300" style="height: ${heightPct}%;"></div>
           </div>
@@ -1559,9 +1721,9 @@ async function renderDashboard() {
     }).join('');
   }
   const weeklyTotalHours = document.getElementById('dash-weekly-total-hours');
-  if (weeklyTotalHours) weeklyTotalHours.textContent = `${studyData.week_summary.formatted} this week`;
+  if (weeklyTotalHours) weeklyTotalHours.textContent = `${formatMinutesStr(studyData.week_summary.minutes)} this week`;
 
-  // H. Weekly Targets Quota Card
+  // H. Weekly Targets Quota Card & Motivation
   let totalWeeklyTargetUnits = 0;
   let totalWeeklyAchievedUnits = 0;
 
@@ -1578,12 +1740,16 @@ async function renderDashboard() {
           (s.subject && (s.subject.includes('Physical') || s.subject === 'Physical Chemistry')) &&
           s.date >= weekStart && s.date <= weekEnd
         );
-        achievedVal = pSessions.length;
+        let pMins = 0;
+        pSessions.forEach(s => {
+          pMins += (s.duration_minutes != null && Number(s.duration_minutes) > 0) ? Number(s.duration_minutes) : Math.round((Number(s.duration_hours) || 1) * 60);
+        });
+        achievedVal = Math.round(pMins / 60);
       } else {
         achievedVal = activeLectures.filter(l => 
           l.subject_client_id === sub.client_id && 
           l.is_completed && 
-          ((l.completed_at && l.completed_at >= weekStart && l.completed_at <= weekEnd + 'T23:59:59') || (l.scheduled_date >= weekStart && l.scheduled_date <= weekEnd))
+          (l.completed_at ? (l.completed_at >= weekStart && l.completed_at <= weekEnd + 'T23:59:59') : (l.scheduled_date >= weekStart && l.scheduled_date <= weekEnd))
         ).length;
       }
 
@@ -1608,7 +1774,49 @@ async function renderDashboard() {
   }
 
   const remainingWeeklyUnits = Math.max(0, totalWeeklyTargetUnits - totalWeeklyAchievedUnits);
-  const weeklyPct = totalWeeklyTargetUnits > 0 ? Math.min(100, Math.round((totalWeeklyAchievedUnits / totalWeeklyTargetUnits) * 100)) : 0;
+  const weeklyPct = totalWeeklyTargetUnits > 0 ? Math.round((totalWeeklyAchievedUnits / totalWeeklyTargetUnits) * 100) : 0;
+  const isTargetAchieved = totalWeeklyTargetUnits > 0 && totalWeeklyAchievedUnits >= totalWeeklyTargetUnits;
+
+  // Dynamic Weekly Target Motivation Banner Update
+  const motivation = getWeeklyTargetMotivation({
+    weeklyTarget: totalWeeklyTargetUnits,
+    weeklyAchieved: totalWeeklyAchievedUnits,
+    weeklyPct: weeklyPct,
+    remainingTarget: remainingWeeklyUnits,
+    isAchieved: isTargetAchieved,
+    weeklyStudyMinutes: studyData.week_summary.minutes,
+    dateObj: now
+  });
+
+  const motTextElem = document.getElementById('dash-motivation-text');
+  if (motTextElem) motTextElem.textContent = motivation.text;
+
+  const motBadgeElem = document.getElementById('dash-motivation-badge');
+  if (motBadgeElem) {
+    motBadgeElem.textContent = motivation.badge;
+    motBadgeElem.className = 'px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider text-white ';
+    if (motivation.status === 'achieved') motBadgeElem.className += 'bg-emerald-500/80';
+    else if (motivation.status === 'ahead') motBadgeElem.className += 'bg-teal-500/80';
+    else if (motivation.status === 'close') motBadgeElem.className += 'bg-amber-500/80';
+    else if (motivation.status === 'behind') motBadgeElem.className += 'bg-rose-500/80';
+    else motBadgeElem.className += 'bg-white/25';
+  }
+
+  const motStatElem = document.getElementById('dash-motivation-stat');
+  if (motStatElem) {
+    motStatElem.textContent = totalWeeklyTargetUnits > 0 ? `${weeklyPct}% achieved (${totalWeeklyAchievedUnits}/${totalWeeklyTargetUnits})` : `${formatMinutesStr(studyData.week_summary.minutes)} studied`;
+  }
+
+  const motRemainingElem = document.getElementById('dash-motivation-remaining');
+  if (motRemainingElem) {
+    motRemainingElem.textContent = totalWeeklyTargetUnits > 0 ? (remainingWeeklyUnits === 0 ? 'Goal Met!' : `${remainingWeeklyUnits} left`) : '—';
+    motRemainingElem.className = `text-sm font-black ${isTargetAchieved ? 'text-emerald-300' : 'text-white'}`;
+  }
+
+  const motIconElem = document.getElementById('dash-motivation-icon');
+  if (motIconElem && motivation.icon) {
+    motIconElem.setAttribute('data-lucide', motivation.icon);
+  }
 
   const weeklyTargetTotal = document.getElementById('dash-weekly-target-total');
   if (weeklyTargetTotal) weeklyTargetTotal.textContent = `${totalWeeklyTargetUnits}`;
@@ -1619,7 +1827,7 @@ async function renderDashboard() {
   const weeklyPctTotal = document.getElementById('dash-weekly-pct-total');
   if (weeklyPctTotal) weeklyPctTotal.textContent = `${weeklyPct}%`;
   const weeklyProgressBar = document.getElementById('dash-weekly-progress-bar');
-  if (weeklyProgressBar) weeklyProgressBar.style.width = `${weeklyPct}%`;
+  if (weeklyProgressBar) weeklyProgressBar.style.width = `${Math.min(100, weeklyPct)}%`;
 
   // E. JEE Test Analytics & Upcoming Card
   const testCompletedCount = document.getElementById('dash-test-completed-count');
@@ -2852,6 +3060,135 @@ async function handleAddTestSubmit(e) {
   refreshCurrentView();
 }
 
+async function openLogStudyModal() {
+  const subjects = await dbGetAll('subjects');
+  const subSelect = document.getElementById('study-form-subject');
+  if (subSelect) {
+    subSelect.innerHTML = subjects.map(s => `
+      <option value="${s.client_id}">${s.display_name || s.name}</option>
+    `).join('');
+  }
+  const dateInput = document.getElementById('study-form-date');
+  if (dateInput) dateInput.value = getTodayDateStr();
+  const durInput = document.getElementById('study-form-duration');
+  if (durInput) durInput.value = 60;
+  const topicInput = document.getElementById('study-form-topic');
+  if (topicInput) topicInput.value = '';
+
+  document.getElementById('sheet-backdrop').classList.add('open');
+  document.getElementById('sheet-log-study').classList.add('open');
+}
+
+async function handleLogStudySubmit(e) {
+  e.preventDefault();
+  const subId = document.getElementById('study-form-subject').value;
+  const subjects = await dbGetAll('subjects');
+  const sub = subjects.find(s => s.client_id === subId);
+  const subjectName = sub ? (sub.display_name || sub.name) : 'Study Session';
+  const date = document.getElementById('study-form-date').value || getTodayDateStr();
+  const durationMins = parseInt(document.getElementById('study-form-duration').value, 10) || 60;
+  const topic = document.getElementById('study-form-topic').value.trim() || 'Focus Session';
+  const nowIso = new Date().toISOString();
+
+  const newSession = {
+    client_id: generateUUID(),
+    source: 'Pomodoro',
+    external_session_id: `manual_${Date.now()}`,
+    date: date,
+    start_time: new Date().toTimeString().slice(0, 8),
+    end_time: new Date(Date.now() + durationMins * 60000).toTimeString().slice(0, 8),
+    duration_minutes: durationMins,
+    duration_hours: Math.round((durationMins / 60) * 100) / 100,
+    subject: subjectName,
+    chapter: '',
+    topic: topic,
+    activity: 'Pomodoro Focus',
+    notes: '',
+    sync_status: 'pending',
+    created_at: nowIso,
+    updated_at: nowIso
+  };
+
+  await dbPut('study_sessions', newSession);
+  showToast(`Logged ${formatMinutesStr(durationMins)} focus session!`, 'success');
+  closeAllSheets();
+  triggerDebouncedAutoSync();
+  refreshCurrentView();
+}
+
+async function openEditWeeklyTargetsModal() {
+  const subjects = await dbGetAll('subjects');
+  const weeklyTargets = await dbGetAll('weekly_targets');
+  const todayStr = getTodayDateStr();
+  const { weekStart, weekEnd } = getWeekDateRange(todayStr);
+
+  const weekLabel = document.getElementById('sheet-target-week-label');
+  if (weekLabel) weekLabel.textContent = `${weekStart} to ${weekEnd}`;
+
+  const container = document.getElementById('weekly-targets-inputs-container');
+  if (container) {
+    container.innerHTML = subjects.map(sub => {
+      const custom = weeklyTargets.find(wt => wt.week_start === weekStart && wt.subject_client_id === sub.client_id);
+      const targetVal = custom ? custom.target_value : sub.weekly_target_val;
+      const unit = sub.target_type === 'hours' ? 'hours' : 'lectures';
+      return `
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-bold text-slate-800">${sub.display_name || sub.name}</div>
+            <div class="text-[10px] text-slate-500 capitalize">Unit: ${unit}</div>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <input type="number" id="wt-input-${sub.client_id}" value="${targetVal}" min="0" step="1"
+              class="w-20 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-black text-slate-900 text-right focus:outline-emerald-600">
+            <span class="text-[11px] font-bold text-slate-500">${unit === 'hours' ? 'h' : 'lecs'}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  document.getElementById('sheet-backdrop').classList.add('open');
+  document.getElementById('sheet-edit-weekly-targets').classList.add('open');
+}
+
+async function handleEditWeeklyTargetsSubmit(e) {
+  e.preventDefault();
+  const subjects = await dbGetAll('subjects');
+  const weeklyTargets = await dbGetAll('weekly_targets');
+  const todayStr = getTodayDateStr();
+  const { weekStart } = getWeekDateRange(todayStr);
+  const nowIso = new Date().toISOString();
+
+  for (const sub of subjects) {
+    const input = document.getElementById(`wt-input-${sub.client_id}`);
+    const newVal = input ? Math.max(0, parseFloat(input.value) || 0) : (sub.weekly_target_val || 0);
+    const existing = weeklyTargets.find(wt => wt.week_start === weekStart && wt.subject_client_id === sub.client_id);
+    if (existing) {
+      existing.target_value = newVal;
+      existing.updated_at = nowIso;
+      existing.sync_status = 'pending';
+      await dbPut('weekly_targets', existing);
+    } else {
+      const newTarget = {
+        client_id: generateUUID(),
+        week_start: weekStart,
+        subject_id: sub.id || 0,
+        subject_client_id: sub.client_id,
+        target_value: newVal,
+        sync_status: 'pending',
+        created_at: nowIso,
+        updated_at: nowIso
+      };
+      await dbPut('weekly_targets', newTarget);
+    }
+  }
+
+  showToast('Weekly targets updated!', 'success');
+  closeAllSheets();
+  triggerDebouncedAutoSync();
+  refreshCurrentView();
+}
+
 // ============================================================================
 // 8. APP BOOTSTRAP
 // ============================================================================
@@ -2882,12 +3219,22 @@ window.addEventListener('DOMContentLoaded', async () => {
       showToast('Working offline (Local Mode)', 'info');
     });
 
-    // Periodic auto-sync every 60 seconds
+    // Periodic auto-sync and time-based dashboard refresh
     setInterval(() => {
+      if (currentView === 'dashboard') {
+        renderDashboard();
+      }
       if (navigator.onLine && currentUser && !syncInProgress) {
         syncNow();
       }
     }, 60000);
+
+    // Refresh active view when app returns to foreground
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        refreshCurrentView();
+      }
+    });
 
     if (window.lucide) lucide.createIcons();
   } catch (err) {

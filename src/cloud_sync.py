@@ -30,8 +30,9 @@ KEY_CLOUD_LAST_SYNC = 'cloud_last_sync_time'
 KEY_CLOUD_SYNC_STATUS = 'cloud_sync_status'
 
 class CloudSyncEngine:
-    def __init__(self, db_manager):
+    def __init__(self, db_manager, pomodoro_sync=None):
         self.db = db_manager
+        self.pomodoro_sync = pomodoro_sync
         self._lock = threading.Lock()
         self._sync_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -43,6 +44,16 @@ class CloudSyncEngine:
         
         # Initialize Supabase client
         self._init_client()
+
+    def flush_pomodoro(self):
+        """Flushes any active Pomodoro session before sync so uncommitted study time is uploaded."""
+        if self.pomodoro_sync and hasattr(self.pomodoro_sync, 'flush_live_session'):
+            try:
+                res = self.pomodoro_sync.flush_live_session()
+                if res.get('flushed'):
+                    print(f"[CloudSync] Pomodoro live session flushed ({res.get('minutes')} min) into SQLite before cloud sync.")
+            except Exception as e:
+                print(f"[CloudSync] Error flushing Pomodoro session: {e}")
 
     def _init_client(self):
         try:
@@ -204,13 +215,15 @@ class CloudSyncEngine:
     def sync_now(self, timeout: float = 30.0) -> Dict[str, Any]:
         """Runs a complete bidirectional sync (Local Push & Cloud Pull). Thread-safe."""
         if not self._lock.acquire(timeout=timeout):
+            print("[CloudSync] Sync already in progress, skipping concurrent trigger.")
             return {"success": True, "message": "Sync already in progress."}
 
         try:
             is_enabled = self._get_setting(KEY_CLOUD_ENABLED, "false").lower() == "true"
             user_id = self._get_setting(KEY_CLOUD_USER_ID, "")
             
-            print("SYNC START")
+            print(f"\n==================== CLOUD SYNC START ====================")
+            print(f"[CloudSync] Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"[CloudSync] Enabled: {is_enabled}, User ID: {user_id or '(not set)'}")
             
             if not is_enabled or not user_id:
@@ -222,24 +235,44 @@ class CloudSyncEngine:
 
             if not self._client:
                 self._init_client()
-            
+
             # Ensure valid authenticated session
             session = self._restore_session()
-            if not session:
+            valid_auth = False
+            if self._client:
                 try:
-                    s_resp = self._client.auth.get_session()
-                    session = s_resp if hasattr(s_resp, 'user') else getattr(s_resp, 'session', None)
+                    u_resp = self._client.auth.get_user()
+                    if u_resp and u_resp.user:
+                        valid_auth = True
                 except Exception:
-                    session = None
+                    valid_auth = False
 
-            if not session:
+            if not valid_auth:
+                email = self._get_setting(KEY_CLOUD_USER_EMAIL)
+                password = self._get_setting(KEY_CLOUD_USER_PASSWORD)
+                if email and password and self._client:
+                    try:
+                        print(f"[CloudSync] Re-authenticating {email} with Supabase...")
+                        res = self._client.auth.sign_in_with_password({"email": email, "password": password})
+                        if res and res.session:
+                            self._save_session(res.session)
+                            valid_auth = True
+                            print("[CloudSync] Re-authentication successful!")
+                    except Exception as reauth_err:
+                        print(f"[CloudSync] Re-authentication failed: {reauth_err}")
+
+            if not valid_auth:
                 error_msg = "Not authenticated with Supabase. Session restore failed."
                 print(f"SYNC ERROR\nSTAGE: AUTHENTICATION\nERROR: {error_msg}")
                 self._set_setting(KEY_CLOUD_SYNC_STATUS, f"Sync error: {error_msg}")
                 return {"success": False, "error": error_msg}
 
+            # 0. Flush any live/uncommitted Pomodoro minutes into SQLite study_sessions before pushing
+            self.flush_pomodoro()
+
             # 1. PUSH LOCAL PENDING CHANGES
             try:
+                print("[CloudSync] --- STAGE 1: UPLOADING LOCAL CHANGES ---")
                 pushed_count = self._push_local_changes(user_id)
                 print(f"UPLOAD RESULT: Pushed {pushed_count} items")
             except Exception as push_err:
@@ -249,6 +282,7 @@ class CloudSyncEngine:
             # 2. PULL CLOUD CHANGES
             last_sync = self._get_setting(KEY_CLOUD_LAST_SYNC, "")
             try:
+                print(f"[CloudSync] --- STAGE 2: DOWNLOADING CLOUD CHANGES (since {last_sync or 'start'}) ---")
                 pulled_count = self._pull_cloud_changes(user_id, last_sync)
                 print(f"DOWNLOAD RESULT: Pulled {pulled_count} items")
             except Exception as pull_err:
@@ -256,6 +290,7 @@ class CloudSyncEngine:
                 raise pull_err
 
             # 3. MERGE CONFIRMATION
+            print("[CloudSync] --- STAGE 3: MERGE CONFIRMATION ---")
             print("MERGE RESULT: Successfully merged into local SQLite")
 
             # Record timestamp of successful sync
@@ -264,6 +299,7 @@ class CloudSyncEngine:
             self._set_setting(KEY_CLOUD_SYNC_STATUS, "Synced")
             
             print(f"SYNC SUCCESS: Pushed: {pushed_count}, Pulled: {pulled_count}")
+            print(f"==================== CLOUD SYNC END ====================\n")
 
             return {
                 "success": True,
@@ -276,6 +312,7 @@ class CloudSyncEngine:
         except Exception as e:
             error_msg = str(e)
             print(f"SYNC ERROR\nSTAGE: GENERAL\nERROR: {error_msg}")
+            print(f"==================== CLOUD SYNC FAILED ====================\n")
             self._set_setting(KEY_CLOUD_SYNC_STATUS, f"Sync error: {error_msg[:80]}")
             return {"success": False, "error": error_msg}
         finally:
@@ -404,14 +441,17 @@ class CloudSyncEngine:
                     "updated_at": now_iso,
                     "deleted_at": r.get("deleted_at")
                 } for r in rows]
+                pushed_cids = [r["client_id"] for r in rows]
                 self._client.table("tests").upsert(payload, on_conflict="user_id,client_id").execute()
-                conn.execute("UPDATE tests SET sync_status = 'synced' WHERE sync_status = 'pending'")
+                placeholders = ','.join('?' * len(pushed_cids))
+                conn.execute(f"UPDATE tests SET sync_status = 'synced' WHERE client_id IN ({placeholders})", pushed_cids)
                 total_pushed += len(payload)
 
             # 5. WEEKLY TARGETS
             cur = conn.execute("SELECT * FROM weekly_targets WHERE sync_status = 'pending'")
             rows = [dict(r) for r in cur.fetchall()]
             if rows:
+                pushed_cids = [r["client_id"] for r in rows]
                 payload = [{
                     "user_id": user_id,
                     "client_id": r["client_id"],
@@ -422,13 +462,15 @@ class CloudSyncEngine:
                     "deleted_at": r.get("deleted_at")
                 } for r in rows]
                 self._client.table("weekly_targets").upsert(payload, on_conflict="user_id,client_id").execute()
-                conn.execute("UPDATE weekly_targets SET sync_status = 'synced' WHERE sync_status = 'pending'")
+                placeholders = ','.join('?' * len(pushed_cids))
+                conn.execute(f"UPDATE weekly_targets SET sync_status = 'synced' WHERE client_id IN ({placeholders})", pushed_cids)
                 total_pushed += len(payload)
 
-            # 6. STUDY SESSIONS
+            # 6. STUDY SESSIONS (Pomodoro Study Time & Manual Sessions)
             cur = conn.execute("SELECT * FROM study_sessions WHERE sync_status = 'pending'")
             rows = [dict(r) for r in cur.fetchall()]
             if rows:
+                pushed_cids = [r["client_id"] for r in rows]
                 payload = [{
                     "user_id": user_id,
                     "client_id": r["client_id"],
@@ -437,8 +479,8 @@ class CloudSyncEngine:
                     "date": r["date"],
                     "start_time": r.get("start_time"),
                     "end_time": r.get("end_time"),
-                    "duration_minutes": r["duration_minutes"],
-                    "duration_hours": r["duration_hours"],
+                    "duration_minutes": float(r["duration_minutes"] or 0),
+                    "duration_hours": float(r["duration_hours"] or 0),
                     "subject": r.get("subject", ""),
                     "chapter": r.get("chapter", ""),
                     "topic": r.get("topic", ""),
@@ -447,14 +489,20 @@ class CloudSyncEngine:
                     "updated_at": now_iso,
                     "deleted_at": r.get("deleted_at")
                 } for r in rows]
+                print(f"[CloudSync] Pushing {len(payload)} study sessions to Supabase:")
+                for p in payload:
+                    print(f"  -> {p['date']} | {p['duration_minutes']}m ({p['source']}) ext_id={p['external_session_id']}")
                 self._client.table("study_sessions").upsert(payload, on_conflict="user_id,client_id").execute()
-                conn.execute("UPDATE study_sessions SET sync_status = 'synced' WHERE sync_status = 'pending'")
+                placeholders = ','.join('?' * len(pushed_cids))
+                conn.execute(f"UPDATE study_sessions SET sync_status = 'synced' WHERE client_id IN ({placeholders})", pushed_cids)
                 total_pushed += len(payload)
+                print(f"[CloudSync] [OK] Successfully uploaded {len(payload)} study sessions")
 
             # 7. REVISIONS
             cur = conn.execute("SELECT * FROM revisions WHERE sync_status = 'pending'")
             rows = [dict(r) for r in cur.fetchall()]
             if rows:
+                pushed_cids = [r["client_id"] for r in rows]
                 payload = [{
                     "user_id": user_id,
                     "client_id": r["client_id"],
@@ -468,7 +516,8 @@ class CloudSyncEngine:
                     "deleted_at": r.get("deleted_at")
                 } for r in rows]
                 self._client.table("revisions").upsert(payload, on_conflict="user_id,client_id").execute()
-                conn.execute("UPDATE revisions SET sync_status = 'synced' WHERE sync_status = 'pending'")
+                placeholders = ','.join('?' * len(pushed_cids))
+                conn.execute(f"UPDATE revisions SET sync_status = 'synced' WHERE client_id IN ({placeholders})", pushed_cids)
                 total_pushed += len(payload)
 
             conn.commit()
@@ -535,14 +584,15 @@ class CloudSyncEngine:
                 self.db.merge_cloud_weekly_targets(res.data)
                 total_pulled += len(res.data)
 
-            # 6. PULL STUDY SESSIONS
+            # 6. PULL STUDY SESSIONS (always pull all user sessions to prevent clock skew from dropping sessions)
+            print("[CloudSync] Pulling study sessions from Supabase...")
             query = self._client.table("study_sessions").select("*").eq("user_id", user_id)
-            if filter_time:
-                query = query.gt("updated_at", filter_time)
             res = query.execute()
             if res.data:
-                self.db.merge_cloud_study_sessions(res.data)
-                total_pulled += len(res.data)
+                stats = self.db.merge_cloud_study_sessions(res.data)
+                pulled_study = stats.get('inserted', 0) + stats.get('updated', 0)
+                total_pulled += pulled_study
+                print(f"[CloudSync] Study sessions pulled: {len(res.data)} total from cloud (Inserted: {stats.get('inserted', 0)}, Updated: {stats.get('updated', 0)}, Skipped: {stats.get('skipped', 0)})")
 
             # 7. PULL REVISIONS
             query = self._client.table("revisions").select("*").eq("user_id", user_id)

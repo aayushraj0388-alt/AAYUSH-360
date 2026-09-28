@@ -5048,9 +5048,7 @@ async function handleCloudSyncNow() {
   if (res.success) {
     showToast(res.message || 'Cloud sync complete!', 'success');
     await loadInitialData();
-    if (state.currentView === 'settings') {
-      renderSettings(document.getElementById('view-content'));
-    }
+    refreshCurrentView();
   } else {
     showToast(`Sync warning: ${res.error}`, 'error');
   }

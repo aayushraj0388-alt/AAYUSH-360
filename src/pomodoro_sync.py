@@ -241,6 +241,7 @@ class PomodoroSyncEngine:
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._leveldb_dir = get_default_leveldb_dir()
+        self.on_session_committed = None
         self._live_session = {
             'active': False,
             'start_time': '',
@@ -339,10 +340,77 @@ class PomodoroSyncEngine:
             ))
             conn.commit()
             conn.close()
+            print(f"[PomodoroSync] Successfully committed {duration_minutes} min session (client_id: {cid}, ext_id: {ext_id})")
+            if self.on_session_committed and callable(self.on_session_committed):
+                try:
+                    self.on_session_committed()
+                except Exception as cb_err:
+                    print(f"[PomodoroSync] on_session_committed error: {cb_err}")
             return True
         except Exception as e:
             print("Error committing study session:", e)
             return False
+
+    def flush_live_session(self, force: bool = True) -> Dict[str, Any]:
+        """
+        Forces immediate conversion of any uncommitted/live Pomodoro study minutes
+        into a persistent Study Time Log in SQLite, with sync_status='pending'.
+        Guarantees that pending sync payload ALWAYS contains the latest Pomodoro data.
+        Safe to call at any time, even while Pedro timer is actively running.
+        """
+        with self._lock:
+            settings = self._get_settings()
+            if settings.get(KEY_ENABLED, 'false') != 'true':
+                return {'flushed': False, 'minutes': 0}
+
+            current_stats = read_pomodoro_stats(self._leveldb_dir)
+            if not current_stats:
+                return {'flushed': False, 'minutes': 0}
+
+            cur_total_minutes = int(current_stats.get('totalMinutes', 0))
+            cur_total_focus   = int(current_stats.get('totalFocus', 0))
+
+            baseline_mins = int(settings.get(KEY_BASELINE_MINUTES, cur_total_minutes))
+            last_processed_mins = int(settings.get(KEY_LAST_MINUTES, baseline_mins))
+            last_processed_focus = int(settings.get(KEY_LAST_FOCUS, cur_total_focus))
+
+            delta_mins = max(0, cur_total_minutes - last_processed_mins)
+            live_mins = self._live_session.get('current_minutes', 0)
+            duration = max(delta_mins, live_mins)
+            focus_delta = max(0, cur_total_focus - last_processed_focus)
+
+            if duration <= 0:
+                return {'flushed': False, 'minutes': 0}
+
+            today_str = datetime.date.today().isoformat()
+            now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            start_t = self._live_session.get('start_time') or datetime.datetime.now().strftime('%H:%M')
+            end_t = datetime.datetime.now().strftime('%H:%M')
+
+            committed = self._commit_completed_session(
+                date_str=today_str,
+                duration_minutes=duration,
+                focus_count=focus_delta,
+                start_time=start_t,
+                end_time=end_t
+            )
+
+            if committed:
+                self._set_settings({
+                    KEY_LAST_MINUTES:    str(cur_total_minutes),
+                    KEY_LAST_FOCUS:      str(cur_total_focus),
+                    KEY_LIVE_ACTIVE:     'false',
+                    KEY_LIVE_MINUTES:    '0',
+                    KEY_LIVE_START_TIME: '',
+                    KEY_LAST_SYNC:       now_str
+                })
+                self._live_session['active'] = False
+                self._live_session['current_minutes'] = 0
+                self._live_session['start_minutes'] = cur_total_minutes
+                print(f"[PomodoroSync] Flushed {duration} minutes into persistent study_sessions")
+                return {'flushed': True, 'minutes': duration}
+
+            return {'flushed': False, 'minutes': 0}
 
     # -----------------------------------------------------------------------
     # Real-Time & Live Session Detection Loop
@@ -629,51 +697,52 @@ class PomodoroSyncEngine:
 
         try:
             today_str = datetime.date.today().isoformat()
-            week_start = (
-                datetime.date.today()
-                - datetime.timedelta(days=datetime.date.today().weekday())
-            ).isoformat()
-            month_start = datetime.date.today().replace(day=1).isoformat()
+            today_dt = datetime.date.today()
+            week_start = (today_dt - datetime.timedelta(days=today_dt.weekday())).isoformat()
+            week_end = (today_dt + datetime.timedelta(days=6 - today_dt.weekday())).isoformat()
+            month_start = today_dt.replace(day=1).isoformat()
             activation_ts = settings.get(KEY_ACTIVATED_AT, '')
 
             conn = self.db.get_connection()
             c = conn.cursor()
 
+            base_filter = "AND (deleted_at IS NULL OR deleted_at = '')"
+
             if activation_ts:
                 activation_date = activation_ts[:10]
                 total_mins = c.execute(
-                    "SELECT SUM(duration_minutes) FROM study_sessions "
-                    "WHERE source = 'Pomodoro' AND date >= ?;",
+                    f"SELECT SUM(duration_minutes) FROM study_sessions "
+                    f"WHERE source = 'Pomodoro' AND date >= ? {base_filter};",
                     (activation_date,)
                 ).fetchone()[0] or 0.0
                 total_focus_count = c.execute(
-                    "SELECT COUNT(*) FROM study_sessions "
-                    "WHERE source = 'Pomodoro' AND date >= ?;",
+                    f"SELECT COUNT(*) FROM study_sessions "
+                    f"WHERE source = 'Pomodoro' AND date >= ? {base_filter};",
                     (activation_date,)
                 ).fetchone()[0] or 0
             else:
                 total_mins = c.execute(
-                    "SELECT SUM(duration_minutes) FROM study_sessions WHERE source = 'Pomodoro';"
+                    f"SELECT SUM(duration_minutes) FROM study_sessions WHERE source = 'Pomodoro' {base_filter};"
                 ).fetchone()[0] or 0.0
                 total_focus_count = c.execute(
-                    "SELECT COUNT(*) FROM study_sessions WHERE source = 'Pomodoro';"
+                    f"SELECT COUNT(*) FROM study_sessions WHERE source = 'Pomodoro' {base_filter};"
                 ).fetchone()[0] or 0
 
             today_mins = c.execute(
-                "SELECT SUM(duration_minutes) FROM study_sessions "
-                "WHERE source = 'Pomodoro' AND date = ?;",
+                f"SELECT SUM(duration_minutes) FROM study_sessions "
+                f"WHERE source = 'Pomodoro' AND date = ? {base_filter};",
                 (today_str,)
             ).fetchone()[0] or 0.0
 
             week_mins = c.execute(
-                "SELECT SUM(duration_minutes) FROM study_sessions "
-                "WHERE source = 'Pomodoro' AND date >= ?;",
-                (week_start,)
+                f"SELECT SUM(duration_minutes) FROM study_sessions "
+                f"WHERE source = 'Pomodoro' AND date >= ? AND date <= ? {base_filter};",
+                (week_start, week_end)
             ).fetchone()[0] or 0.0
 
             month_mins = c.execute(
-                "SELECT SUM(duration_minutes) FROM study_sessions "
-                "WHERE source = 'Pomodoro' AND date >= ?;",
+                f"SELECT SUM(duration_minutes) FROM study_sessions "
+                f"WHERE source = 'Pomodoro' AND date >= ? {base_filter};",
                 (month_start,)
             ).fetchone()[0] or 0.0
 

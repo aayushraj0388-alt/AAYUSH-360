@@ -556,8 +556,10 @@ class DatabaseManager:
         conn = self.get_connection()
         c = conn.cursor()
 
+        pomo_filter = "AND (deleted_at IS NULL OR deleted_at = '') AND (source = 'Pomodoro' OR (subject != 'Physical Chemistry' AND (client_id IS NULL OR client_id NOT LIKE 'pch_%') AND (external_session_id IS NULL OR external_session_id NOT LIKE 'pch_%')))"
+
         # Check total sessions count
-        total_sessions = c.execute("SELECT COUNT(*) FROM study_sessions;").fetchone()[0] or 0
+        total_sessions = c.execute(f"SELECT COUNT(*) FROM study_sessions WHERE 1=1 {pomo_filter};").fetchone()[0] or 0
 
         settings = dict(c.execute("SELECT key, value FROM app_settings;").fetchall())
         is_enabled = settings.get('pomo_integration_enabled') == 'true'
@@ -591,6 +593,7 @@ class DatabaseManager:
                 },
                 'today_summary': {
                     'hours': 0.0,
+                    'minutes': 0,
                     'total_hours': 0.0,
                     'formatted': '0h',
                     'duration_str': '0h',
@@ -600,6 +603,7 @@ class DatabaseManager:
                 },
                 'week_summary': {
                     'hours': 0.0,
+                    'minutes': 0,
                     'total_hours': 0.0,
                     'formatted': '0h',
                     'duration_str': '0h',
@@ -609,6 +613,7 @@ class DatabaseManager:
                 },
                 'month_summary': {
                     'hours': 0.0,
+                    'minutes': 0,
                     'total_hours': 0.0,
                     'formatted': '0h',
                     'duration_str': '0h',
@@ -618,6 +623,7 @@ class DatabaseManager:
                 },
                 'total_summary': {
                     'hours': 0.0,
+                    'minutes': 0,
                     'total_hours': 0.0,
                     'formatted': '0h',
                     'duration_str': '0h',
@@ -685,10 +691,12 @@ class DatabaseManager:
             }
 
         # Calculations from REAL session data
+        del_filter = pomo_filter
+
         # 1. Today
-        today_hrs_raw = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ?;", (today_str,)).fetchone()[0] or 0.0
-        today_mins_raw = c.execute("SELECT SUM(duration_minutes) FROM study_sessions WHERE date = ?;", (today_str,)).fetchone()[0] or 0.0
-        today_sessions = c.execute("SELECT COUNT(*) FROM study_sessions WHERE date = ?;", (today_str,)).fetchone()[0] or 0
+        today_hrs_raw = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date = ? {del_filter};", (today_str,)).fetchone()[0] or 0.0
+        today_mins_raw = c.execute(f"SELECT SUM(duration_minutes) FROM study_sessions WHERE date = ? {del_filter};", (today_str,)).fetchone()[0] or 0.0
+        today_sessions = c.execute(f"SELECT COUNT(*) FROM study_sessions WHERE date = ? {del_filter};", (today_str,)).fetchone()[0] or 0
 
         today_hrs = round(today_hrs_raw + live_hrs, 2)
         today_mins = round(today_mins_raw + live_mins, 2)
@@ -696,29 +704,35 @@ class DatabaseManager:
         today_status = "Currently studying" if live_active else ("Studied today" if today_sessions > 0 else "Not studied yet today")
 
         # 2. Week
-        week_hrs_raw = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ?;", (start_of_week, end_of_week)).fetchone()[0] or 0.0
+        week_hrs_raw = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ? {del_filter};", (start_of_week, end_of_week)).fetchone()[0] or 0.0
+        week_mins_raw = c.execute(f"SELECT SUM(duration_minutes) FROM study_sessions WHERE date >= ? AND date <= ? {del_filter};", (start_of_week, end_of_week)).fetchone()[0] or 0.0
         week_hrs = round(week_hrs_raw + live_hrs, 2)
-        week_sessions = c.execute("SELECT COUNT(*) FROM study_sessions WHERE date >= ? AND date <= ?;", (start_of_week, end_of_week)).fetchone()[0] or 0
-        week_dates_studied = [r[0] for r in c.execute("SELECT DISTINCT date FROM study_sessions WHERE date >= ? AND date <= ?;", (start_of_week, end_of_week)).fetchall()]
+        week_mins = round(week_mins_raw + live_mins, 2)
+        week_sessions = c.execute(f"SELECT COUNT(*) FROM study_sessions WHERE date >= ? AND date <= ? {del_filter};", (start_of_week, end_of_week)).fetchone()[0] or 0
+        week_dates_studied = [r[0] for r in c.execute(f"SELECT DISTINCT date FROM study_sessions WHERE date >= ? AND date <= ? {del_filter};", (start_of_week, end_of_week)).fetchall()]
         if live_active and today_str not in week_dates_studied:
             week_dates_studied.append(today_str)
         week_days_studied = len(week_dates_studied)
         week_avg_per_day = round(week_hrs / week_days_studied, 2) if week_days_studied > 0 else 0.0
 
         # 3. Month
-        month_hrs_raw = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ?;", (start_of_month, end_of_month)).fetchone()[0] or 0.0
+        month_hrs_raw = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ? {del_filter};", (start_of_month, end_of_month)).fetchone()[0] or 0.0
+        month_mins_raw = c.execute(f"SELECT SUM(duration_minutes) FROM study_sessions WHERE date >= ? AND date <= ? {del_filter};", (start_of_month, end_of_month)).fetchone()[0] or 0.0
         month_hrs = round(month_hrs_raw + live_hrs, 2)
-        month_sessions = c.execute("SELECT COUNT(*) FROM study_sessions WHERE date >= ? AND date <= ?;", (start_of_month, end_of_month)).fetchone()[0] or 0
-        month_dates_studied = [r[0] for r in c.execute("SELECT DISTINCT date FROM study_sessions WHERE date >= ? AND date <= ?;", (start_of_month, end_of_month)).fetchall()]
+        month_mins = round(month_mins_raw + live_mins, 2)
+        month_sessions = c.execute(f"SELECT COUNT(*) FROM study_sessions WHERE date >= ? AND date <= ? {del_filter};", (start_of_month, end_of_month)).fetchone()[0] or 0
+        month_dates_studied = [r[0] for r in c.execute(f"SELECT DISTINCT date FROM study_sessions WHERE date >= ? AND date <= ? {del_filter};", (start_of_month, end_of_month)).fetchall()]
         if live_active and today_str not in month_dates_studied:
             month_dates_studied.append(today_str)
         month_days_studied = len(month_dates_studied)
         month_avg_per_day = round(month_hrs / month_days_studied, 2) if month_days_studied > 0 else 0.0
 
         # 4. Total
-        total_hrs_raw = c.execute("SELECT SUM(duration_hours) FROM study_sessions;").fetchone()[0] or 0.0
+        total_hrs_raw = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE 1=1 {del_filter};").fetchone()[0] or 0.0
+        total_mins_raw = c.execute(f"SELECT SUM(duration_minutes) FROM study_sessions WHERE 1=1 {del_filter};").fetchone()[0] or 0.0
         total_hrs = round(total_hrs_raw + live_hrs, 2)
-        studied_dates = [r[0] for r in c.execute("SELECT DISTINCT date FROM study_sessions ORDER BY date ASC;").fetchall()]
+        total_mins = round(total_mins_raw + live_mins, 2)
+        studied_dates = [r[0] for r in c.execute(f"SELECT DISTINCT date FROM study_sessions WHERE 1=1 {del_filter} ORDER BY date ASC;").fetchall()]
         if live_active and today_str not in studied_dates:
             studied_dates.append(today_str)
         days_studied = len(studied_dates)
@@ -817,8 +831,8 @@ class DatabaseManager:
         for i in range(7):
             d_dt = mon_dt + datetime.timedelta(days=i)
             d_str = d_dt.isoformat()
-            dh = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ?;", (d_str,)).fetchone()[0] or 0.0
-            ds = c.execute("SELECT COUNT(*) FROM study_sessions WHERE date = ?;", (d_str,)).fetchone()[0] or 0
+            dh = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date = ? {del_filter};", (d_str,)).fetchone()[0] or 0.0
+            ds = c.execute(f"SELECT COUNT(*) FROM study_sessions WHERE date = ? {del_filter};", (d_str,)).fetchone()[0] or 0
             week_daily_breakdown.append({
                 'day_name': day_abbrs[i],
                 'date': d_str,
@@ -828,9 +842,9 @@ class DatabaseManager:
                 'is_today': d_str == today_str
             })
 
-        week_subjs_raw = c.execute("""
+        week_subjs_raw = c.execute(f"""
         SELECT subject, SUM(duration_hours) as h, COUNT(*) as c
-        FROM study_sessions WHERE date >= ? AND date <= ? AND subject != ''
+        FROM study_sessions WHERE date >= ? AND date <= ? AND subject != '' {del_filter}
         GROUP BY subject ORDER BY h DESC;
         """, (start_of_week, end_of_week)).fetchall()
         week_subjects = [{
@@ -845,8 +859,8 @@ class DatabaseManager:
         month_daily_points = []
         for d in range(1, last_day_this_month + 1):
             d_str = f"{today.year:04d}-{today.month:02d}-{d:02d}"
-            dh = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ?;", (d_str,)).fetchone()[0] or 0.0
-            ds = c.execute("SELECT COUNT(*) FROM study_sessions WHERE date = ?;", (d_str,)).fetchone()[0] or 0
+            dh = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date = ? {del_filter};", (d_str,)).fetchone()[0] or 0.0
+            ds = c.execute(f"SELECT COUNT(*) FROM study_sessions WHERE date = ? {del_filter};", (d_str,)).fetchone()[0] or 0
             month_daily_points.append({
                 'date': d_str,
                 'day': d,
@@ -913,17 +927,17 @@ class DatabaseManager:
             chart_type = 'line'
 
         if f_start and f_end:
-            f_hrs = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ?;", (f_start, f_end)).fetchone()[0] or 0.0
-            f_sessions = c.execute("SELECT COUNT(*) FROM study_sessions WHERE date >= ? AND date <= ?;", (f_start, f_end)).fetchone()[0] or 0
-            f_dates = [r[0] for r in c.execute("SELECT DISTINCT date FROM study_sessions WHERE date >= ? AND date <= ?;", (f_start, f_end)).fetchall()]
-            f_subjs_raw = c.execute("SELECT subject, SUM(duration_hours) as h, COUNT(*) as c FROM study_sessions WHERE date >= ? AND date <= ? AND subject != '' GROUP BY subject ORDER BY h DESC;", (f_start, f_end)).fetchall()
-            f_acts_raw = c.execute("SELECT activity, SUM(duration_hours) as h, COUNT(*) as c FROM study_sessions WHERE date >= ? AND date <= ? AND activity != '' GROUP BY activity ORDER BY h DESC;", (f_start, f_end)).fetchall()
+            f_hrs = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ? {del_filter};", (f_start, f_end)).fetchone()[0] or 0.0
+            f_sessions = c.execute(f"SELECT COUNT(*) FROM study_sessions WHERE date >= ? AND date <= ? {del_filter};", (f_start, f_end)).fetchone()[0] or 0
+            f_dates = [r[0] for r in c.execute(f"SELECT DISTINCT date FROM study_sessions WHERE date >= ? AND date <= ? {del_filter};", (f_start, f_end)).fetchall()]
+            f_subjs_raw = c.execute(f"SELECT subject, SUM(duration_hours) as h, COUNT(*) as c FROM study_sessions WHERE date >= ? AND date <= ? AND subject != '' {del_filter} GROUP BY subject ORDER BY h DESC;", (f_start, f_end)).fetchall()
+            f_acts_raw = c.execute(f"SELECT activity, SUM(duration_hours) as h, COUNT(*) as c FROM study_sessions WHERE date >= ? AND date <= ? AND activity != '' {del_filter} GROUP BY activity ORDER BY h DESC;", (f_start, f_end)).fetchall()
         else:
             f_hrs = total_hrs
             f_sessions = total_sessions
             f_dates = studied_dates
-            f_subjs_raw = c.execute("SELECT subject, SUM(duration_hours) as h, COUNT(*) as c FROM study_sessions WHERE subject != '' GROUP BY subject ORDER BY h DESC;").fetchall()
-            f_acts_raw = c.execute("SELECT activity, SUM(duration_hours) as h, COUNT(*) as c FROM study_sessions WHERE activity != '' GROUP BY activity ORDER BY h DESC;").fetchall()
+            f_subjs_raw = c.execute(f"SELECT subject, SUM(duration_hours) as h, COUNT(*) as c FROM study_sessions WHERE subject != '' {del_filter} GROUP BY subject ORDER BY h DESC;").fetchall()
+            f_acts_raw = c.execute(f"SELECT activity, SUM(duration_hours) as h, COUNT(*) as c FROM study_sessions WHERE activity != '' {del_filter} GROUP BY activity ORDER BY h DESC;").fetchall()
 
         f_days_studied = len(f_dates)
         f_avg_per_day = round(f_hrs / f_days_studied, 2) if f_days_studied > 0 else 0.0
@@ -1038,7 +1052,7 @@ class DatabaseManager:
         daily_trend = []
         for d in range(13, -1, -1):
             cur = (today - datetime.timedelta(days=d)).isoformat()
-            h = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ?;", (cur,)).fetchone()[0] or 0.0
+            h = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date = ? {del_filter};", (cur,)).fetchone()[0] or 0.0
             daily_trend.append({'date': cur, 'hours': round(h, 2)})
 
         # Weekly trend (last 8 weeks)
@@ -1046,7 +1060,7 @@ class DatabaseManager:
         for w in range(7, -1, -1):
             w_start = (today - datetime.timedelta(days=today.weekday() + w * 7)).isoformat()
             w_end = (today - datetime.timedelta(days=today.weekday() + w * 7 - 6)).isoformat()
-            h = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ?;", (w_start, w_end)).fetchone()[0] or 0.0
+            h = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ? {del_filter};", (w_start, w_end)).fetchone()[0] or 0.0
             weekly_trend.append({'week_start': w_start, 'week_end': w_end, 'hours': round(h, 2)})
 
         # Monthly trend (last 6 months)
@@ -1054,7 +1068,7 @@ class DatabaseManager:
         for m in range(5, -1, -1):
             m_dt = today.replace(day=1) - datetime.timedelta(days=m * 30)
             m_str = f"{m_dt.year:04d}-{m_dt.month:02d}"
-            h = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date LIKE ?;", (f"{m_str}%",)).fetchone()[0] or 0.0
+            h = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date LIKE ? {del_filter};", (f"{m_str}%",)).fetchone()[0] or 0.0
             monthly_trend.append({'month': m_str, 'hours': round(h, 2)})
 
         conn.close()
@@ -1078,6 +1092,7 @@ class DatabaseManager:
             # TOP SUMMARY
             'today_summary': {
                 'hours': round(today_hrs, 2),
+                'minutes': int(today_mins),
                 'total_hours': round(today_hrs, 2),
                 'formatted': format_duration_str(today_hrs),
                 'duration_str': format_duration_str(today_hrs),
@@ -1087,6 +1102,7 @@ class DatabaseManager:
             },
             'week_summary': {
                 'hours': round(week_hrs, 2),
+                'minutes': int(week_mins),
                 'total_hours': round(week_hrs, 2),
                 'formatted': format_duration_str(week_hrs),
                 'duration_str': format_duration_str(week_hrs),
@@ -1096,6 +1112,7 @@ class DatabaseManager:
             },
             'month_summary': {
                 'hours': round(month_hrs, 2),
+                'minutes': int(month_mins),
                 'total_hours': round(month_hrs, 2),
                 'formatted': format_duration_str(month_hrs),
                 'duration_str': format_duration_str(month_hrs),
@@ -1105,6 +1122,7 @@ class DatabaseManager:
             },
             'total_summary': {
                 'hours': round(total_hrs, 2),
+                'minutes': int(total_mins),
                 'total_hours': round(total_hrs, 2),
                 'formatted': format_duration_str(total_hrs),
                 'duration_str': format_duration_str(total_hrs),
@@ -2027,17 +2045,18 @@ class DatabaseManager:
         live_hrs = round(live_mins / 60.0, 2)
 
         # Study sessions hours (Actual study time from Pomodoro if synced)
-        pomodoro_today = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date = ? AND (deleted_at IS NULL OR deleted_at = '');", (today,)).fetchone()[0]
+        pomo_filter = "AND (deleted_at IS NULL OR deleted_at = '') AND (source = 'Pomodoro' OR (subject != 'Physical Chemistry' AND (client_id IS NULL OR client_id NOT LIKE 'pch_%') AND (external_session_id IS NULL OR external_session_id NOT LIKE 'pch_%')))"
+        pomodoro_today = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date = ? {pomo_filter};", (today,)).fetchone()[0]
         today_pomodoro_hours = round((pomodoro_today or 0.0) + live_hrs, 2)
 
         current_dt = datetime.date.fromisoformat(today)
         start_of_week = (current_dt - datetime.timedelta(days=current_dt.weekday())).isoformat()
         end_of_week = (current_dt + datetime.timedelta(days=6 - current_dt.weekday())).isoformat()
-        pomodoro_week = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ? AND (deleted_at IS NULL OR deleted_at = '');", (start_of_week, end_of_week)).fetchone()[0]
+        pomodoro_week = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND date <= ? {pomo_filter};", (start_of_week, end_of_week)).fetchone()[0]
         week_pomodoro_hours = round((pomodoro_week or 0.0) + live_hrs, 2)
 
         start_of_month = f"{current_dt.year:04d}-{current_dt.month:02d}-01"
-        pomodoro_month = c.execute("SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? AND (deleted_at IS NULL OR deleted_at = '');", (start_of_month,)).fetchone()[0]
+        pomodoro_month = c.execute(f"SELECT SUM(duration_hours) FROM study_sessions WHERE date >= ? {pomo_filter};", (start_of_month,)).fetchone()[0]
         month_pomodoro_hours = round((pomodoro_month or 0.0) + live_hrs, 2)
 
         # Physical Chem study hours: actual hours from external Pomodoro study_sessions ONLY!
@@ -3551,25 +3570,35 @@ class DatabaseManager:
         conn.commit()
         conn.close()
 
-    def merge_cloud_study_sessions(self, cloud_rows: List[Dict[str, Any]]):
+    def merge_cloud_study_sessions(self, cloud_rows: List[Dict[str, Any]]) -> Dict[str, int]:
         conn = self.get_connection()
         c = conn.cursor()
+        inserted = 0
+        updated = 0
+        skipped = 0
+
         for r in cloud_rows:
             client_id = r.get('client_id')
             deleted_at = r.get('deleted_at')
             if not client_id:
+                skipped += 1
                 continue
+
             src = r.get('source', 'Pomodoro')
             ext_id = r.get('external_session_id')
+            dur_mins = float(r.get('duration_minutes') or 0)
+            dur_hrs = float(r.get('duration_hours') or (dur_mins / 60.0))
+
             existing = c.execute("""
-                SELECT id, sync_status FROM study_sessions 
+                SELECT id, client_id, sync_status, duration_minutes, duration_hours, updated_at FROM study_sessions 
                 WHERE client_id = ? 
                    OR (external_session_id IS NOT NULL AND external_session_id != '' AND source = ? AND external_session_id = ?)
             """, (client_id, src, ext_id)).fetchone()
             
             if existing:
-                # If local session has pending changes, keep local data
-                if existing['sync_status'] == 'pending':
+                # If local session has pending changes and valid duration, keep local data
+                if existing['sync_status'] == 'pending' and (existing['duration_minutes'] or 0) >= dur_mins and not deleted_at:
+                    skipped += 1
                     continue
 
                 c.execute("""
@@ -3581,11 +3610,12 @@ class DatabaseManager:
                     WHERE id = ?
                 """, (
                     client_id, src, ext_id, r.get('date'),
-                    r.get('start_time'), r.get('end_time'), r.get('duration_minutes', 0),
-                    r.get('duration_hours', 0), r.get('subject', ''), r.get('chapter', ''),
+                    r.get('start_time'), r.get('end_time'), dur_mins,
+                    dur_hrs, r.get('subject', ''), r.get('chapter', ''),
                     r.get('topic', ''), r.get('activity', 'Other'), r.get('notes', ''),
                     deleted_at, existing['id']
                 ))
+                updated += 1
             else:
                 if not deleted_at:
                     c.execute("""
@@ -3594,14 +3624,25 @@ class DatabaseManager:
                             duration_minutes, duration_hours, subject, chapter, topic, activity, notes, sync_status,
                             created_at, updated_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', datetime('now', 'localtime'), datetime('now', 'localtime'))
+                        ON CONFLICT(source, external_session_id) DO UPDATE SET
+                            client_id = excluded.client_id,
+                            duration_minutes = excluded.duration_minutes,
+                            duration_hours = excluded.duration_hours,
+                            notes = excluded.notes,
+                            sync_status = 'synced',
+                            updated_at = datetime('now', 'localtime');
                     """, (
                         client_id, src, ext_id, r.get('date'),
-                        r.get('start_time'), r.get('end_time'), r.get('duration_minutes', 0),
-                        r.get('duration_hours', 0), r.get('subject', ''), r.get('chapter', ''),
+                        r.get('start_time'), r.get('end_time'), dur_mins,
+                        dur_hrs, r.get('subject', ''), r.get('chapter', ''),
                         r.get('topic', ''), r.get('activity', 'Other'), r.get('notes', '')
                     ))
+                    inserted += 1
+                else:
+                    skipped += 1
         conn.commit()
         conn.close()
+        return {'inserted': inserted, 'updated': updated, 'skipped': skipped}
 
     def merge_cloud_revisions(self, cloud_rows: List[Dict[str, Any]]):
         conn = self.get_connection()

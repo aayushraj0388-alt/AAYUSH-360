@@ -23,7 +23,7 @@
       </div>
       <div>
         <div class="font-extrabold text-sm tracking-tight bg-gradient-to-r from-indigo-600 via-blue-600 to-pink-600 bg-clip-text text-transparent leading-none">AAYUSH 360</div>
-        <div class="text-[10px] text-slate-500 font-semibold mt-0.5">JEE Command Center</div>
+        <div class="text-[10px] text-slate-500 font-semibold mt-0.5">Mobile Companion</div>
       </div>
     </div>
 
@@ -48,18 +48,36 @@
 
     <!-- ==================== VIEW 1: DASHBOARD ==================== -->
     <section id="view-dashboard" class="space-y-3.5">
-      <!-- Greeting Banner -->
-      <div class="touch-card bg-gradient-to-br from-indigo-700 via-indigo-600 to-blue-600 text-white p-4 rounded-2xl shadow-md shadow-indigo-700/20">
-        <div class="flex items-center justify-between">
-          <div>
-            <div class="flex items-center gap-1.5 text-[11px] font-bold text-indigo-200 uppercase tracking-wider">
-              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>JEE Command Center</span>
-            </div>
-            <h1 class="text-xl font-black mt-1 text-white tracking-tight" id="dash-greeting">Good Afternoon, Aayush</h1>
+      <!-- Dynamic Greeting & Weekly Target Motivation Section -->
+      <div class="touch-card bg-gradient-to-br from-indigo-700 via-indigo-600 to-blue-600 text-white p-4 rounded-2xl shadow-md shadow-indigo-700/20 space-y-3">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0 flex-1">
+            <h1 class="text-xl font-black text-white tracking-tight leading-tight" id="dash-greeting">Good evening, Aayush</h1>
           </div>
-          <div class="text-right">
-            <span id="dash-date-pill" class="text-xs bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-xl font-extrabold text-white border border-white/20 shadow-xs">Today</span>
+          <div class="shrink-0">
+            <span id="dash-date-pill" class="text-xs bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-xl font-extrabold text-white border border-white/20 shadow-xs inline-block">Today</span>
+          </div>
+        </div>
+
+        <!-- Real Weekly Target Motivation Banner -->
+        <div id="dash-motivation-banner" class="bg-black/20 backdrop-blur-md rounded-xl p-3 border border-white/15 flex items-center justify-between gap-3 transition-all duration-300">
+          <div class="flex items-center gap-2.5 min-w-0 flex-1">
+            <div id="dash-motivation-icon-wrap" class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center shrink-0 text-white shadow-xs">
+              <i data-lucide="target" class="w-4 h-4" id="dash-motivation-icon"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span id="dash-motivation-badge" class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-white/25 text-white">Weekly Target</span>
+                <span id="dash-motivation-stat" class="text-[11px] font-bold text-indigo-100">0% achieved</span>
+              </div>
+              <p class="text-xs font-semibold text-white/95 mt-1 leading-snug break-words" id="dash-motivation-text">
+                Track your weekly target progress and keep pushing.
+              </p>
+            </div>
+          </div>
+          <div class="shrink-0 text-right">
+            <div class="text-[10px] font-extrabold uppercase text-indigo-200">Remaining</div>
+            <div class="text-sm font-black text-white" id="dash-motivation-remaining">0</div>
           </div>
         </div>
       </div>
@@ -67,30 +85,30 @@
       <!-- High-Contrast Macro Stats Grid (Requirement B) -->
       <div class="grid grid-cols-3 gap-2.5">
         <!-- Lectures Done -->
-        <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-xs flex flex-col justify-between">
+        <div onclick="switchView('lectures')" class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-xs flex flex-col justify-between cursor-pointer active:scale-95 transition">
           <div>
             <div class="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">Lectures</div>
-            <div class="text-lg font-black text-indigo-700 mt-0.5" id="dash-lectures-completed">0/398</div>
+            <div class="text-lg font-black text-indigo-700 mt-0.5 truncate" id="dash-lectures-completed">0</div>
           </div>
-          <div class="text-[10px] font-extrabold text-indigo-600 bg-indigo-50 rounded-md py-0.5 mt-1" id="dash-lectures-pct">0% Done</div>
+          <div class="text-[10px] font-extrabold text-indigo-600 bg-indigo-50 rounded-md py-0.5 mt-1 truncate" id="dash-lectures-pct">0% Done</div>
         </div>
 
         <!-- Syllabus Progress -->
-        <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-xs flex flex-col justify-between">
+        <div onclick="switchView('subjects')" class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-xs flex flex-col justify-between cursor-pointer active:scale-95 transition">
           <div>
             <div class="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">Syllabus</div>
-            <div class="text-lg font-black text-emerald-700 mt-0.5" id="dash-overall-progress">0%</div>
+            <div class="text-lg font-black text-emerald-700 mt-0.5 truncate" id="dash-overall-progress">0%</div>
           </div>
-          <div class="text-[10px] font-extrabold text-emerald-600 bg-emerald-50 rounded-md py-0.5 mt-1" id="dash-syllabus-detail">Overall</div>
+          <div class="text-[10px] font-extrabold text-emerald-600 bg-emerald-50 rounded-md py-0.5 mt-1 truncate" id="dash-syllabus-detail">Overall</div>
         </div>
 
         <!-- Tests Given -->
-        <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-xs flex flex-col justify-between">
+        <div onclick="switchView('practice')" class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-xs flex flex-col justify-between cursor-pointer active:scale-95 transition">
           <div>
             <div class="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">Tests Given</div>
-            <div class="text-lg font-black text-purple-700 mt-0.5" id="dash-tests-done">0</div>
+            <div class="text-lg font-black text-purple-700 mt-0.5 truncate" id="dash-tests-done">0</div>
           </div>
-          <div class="text-[10px] font-extrabold text-purple-600 bg-purple-50 rounded-md py-0.5 mt-1" id="dash-tests-status">0 Completed</div>
+          <div class="text-[10px] font-extrabold text-purple-600 bg-purple-50 rounded-md py-0.5 mt-1 truncate" id="dash-tests-status">0 Completed</div>
         </div>
       </div>
 
@@ -125,10 +143,16 @@
               </div>
             </div>
           </div>
-          <button onclick="switchView('analytics', 'study_time')" class="px-2.5 py-1 rounded-lg bg-amber-100/80 border border-amber-300 text-xs font-black text-amber-950 flex items-center gap-1 active:scale-95">
-            <span>Analytics</span>
-            <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
-          </button>
+          <div class="flex items-center gap-1.5">
+            <button onclick="openLogStudyModal()" class="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-1 shadow-xs active:scale-95 cursor-pointer">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Log</span>
+            </button>
+            <button onclick="switchView('analytics', 'study_time')" class="px-2.5 py-1 rounded-lg bg-amber-100/80 border border-amber-300 text-xs font-black text-amber-950 flex items-center gap-1 active:scale-95 cursor-pointer">
+              <span>Analytics</span>
+              <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
         </div>
 
         <!-- Target & Progress -->
@@ -146,15 +170,15 @@
         <div class="grid grid-cols-3 gap-2 text-center pt-2 border-t border-amber-200">
           <div class="bg-white rounded-xl p-2.5 border border-slate-200 shadow-2xs">
             <div class="text-xs font-bold text-slate-600">Today</div>
-            <div class="text-sm font-black text-slate-900 mt-0.5" id="dash-study-today-sub">0h</div>
+            <div class="text-sm font-black text-slate-900 mt-0.5 truncate" id="dash-study-today-sub">0h</div>
           </div>
           <div class="bg-white rounded-xl p-2.5 border border-slate-200 shadow-2xs">
             <div class="text-xs font-bold text-slate-600">This Week</div>
-            <div class="text-sm font-black text-slate-900 mt-0.5" id="dash-study-week">0h</div>
+            <div class="text-sm font-black text-slate-900 mt-0.5 truncate" id="dash-study-week">0h</div>
           </div>
           <div class="bg-white rounded-xl p-2.5 border border-slate-200 shadow-2xs">
             <div class="text-xs font-bold text-slate-600">Sessions</div>
-            <div class="text-sm font-black text-slate-900 mt-0.5" id="dash-study-sessions">0</div>
+            <div class="text-sm font-black text-slate-900 mt-0.5 truncate" id="dash-study-sessions">0</div>
           </div>
         </div>
       </div>
@@ -221,7 +245,13 @@
             </div>
             <h2 class="font-extrabold text-sm text-slate-900">Weekly Target Quota</h2>
           </div>
-          <span id="dash-week-label" class="pill bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-extrabold">Current Week</span>
+          <div class="flex items-center gap-1.5">
+            <button onclick="openEditWeeklyTargetsModal()" class="px-2 py-0.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold flex items-center gap-1 active:scale-95 cursor-pointer">
+              <i data-lucide="edit-3" class="w-3 h-3"></i>
+              <span>Edit</span>
+            </button>
+            <span id="dash-week-label" class="pill bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-extrabold">Current Week</span>
+          </div>
         </div>
 
         <!-- Weekly Quota Macro Summary -->
@@ -236,15 +266,15 @@
           <div class="grid grid-cols-3 gap-1 text-center pt-1 text-xs">
             <div>
               <div class="text-[10px] font-bold text-slate-500">Target</div>
-              <div class="font-black text-slate-800" id="dash-weekly-target-total">0</div>
+              <div class="font-black text-slate-800 truncate" id="dash-weekly-target-total">0</div>
             </div>
             <div>
               <div class="text-[10px] font-bold text-slate-500">Done</div>
-              <div class="font-black text-emerald-700" id="dash-weekly-completed-total">0</div>
+              <div class="font-black text-emerald-700 truncate" id="dash-weekly-completed-total">0</div>
             </div>
             <div>
               <div class="text-[10px] font-bold text-slate-500">Remaining</div>
-              <div class="font-black text-amber-700" id="dash-weekly-remaining-total">0</div>
+              <div class="font-black text-amber-700 truncate" id="dash-weekly-remaining-total">0</div>
             </div>
           </div>
         </div>
@@ -885,6 +915,66 @@
       <div class="pt-2 flex gap-2">
         <button type="submit" class="btn-touch flex-1 bg-amber-600 text-white font-bold">
           Save Test
+        </button>
+        <button type="button" onclick="closeAllSheets()" class="btn-touch bg-slate-100 text-slate-600 font-bold">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 5. LOG STUDY SESSION SHEET -->
+  <div id="sheet-log-study" class="bottom-sheet">
+    <div class="sheet-handle"></div>
+    <h2 class="text-base font-extrabold text-slate-800 mb-3">Log Pomodoro Study Session</h2>
+
+    <form id="log-study-form" onsubmit="handleLogStudySubmit(event)" class="space-y-3">
+      <div>
+        <label class="text-[11px] font-bold text-slate-700 uppercase">Subject</label>
+        <select id="study-form-subject" required class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1 font-bold">
+          <!-- Populated dynamically -->
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-[11px] font-bold text-slate-700 uppercase">Date</label>
+          <input type="date" id="study-form-date" required class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1 font-semibold">
+        </div>
+        <div>
+          <label class="text-[11px] font-bold text-slate-700 uppercase">Duration (Minutes)</label>
+          <input type="number" id="study-form-duration" required min="1" max="1440" value="60" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1 font-semibold">
+        </div>
+      </div>
+      <div>
+        <label class="text-[11px] font-bold text-slate-700 uppercase">Topic / Chapter / Notes</label>
+        <input type="text" id="study-form-topic" placeholder="e.g. Rotational Motion numerical problem solving" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs mt-1">
+      </div>
+      <div class="pt-2 flex gap-2">
+        <button type="submit" class="btn-touch flex-1 bg-amber-500 hover:bg-amber-600 text-white font-bold">
+          Save Study Session
+        </button>
+        <button type="button" onclick="closeAllSheets()" class="btn-touch bg-slate-100 text-slate-600 font-bold">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 6. EDIT WEEKLY TARGETS SHEET -->
+  <div id="sheet-edit-weekly-targets" class="bottom-sheet">
+    <div class="sheet-handle"></div>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-base font-extrabold text-slate-800">Edit Weekly Targets</h2>
+      <span id="sheet-target-week-label" class="text-xs font-bold text-indigo-600">Current Week</span>
+    </div>
+
+    <form id="edit-weekly-targets-form" onsubmit="handleEditWeeklyTargetsSubmit(event)" class="space-y-3">
+      <div id="weekly-targets-inputs-container" class="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
+        <!-- Dynamically populated per subject -->
+      </div>
+      <div class="pt-2 flex gap-2">
+        <button type="submit" class="btn-touch flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
+          Update Targets
         </button>
         <button type="button" onclick="closeAllSheets()" class="btn-touch bg-slate-100 text-slate-600 font-bold">
           Cancel

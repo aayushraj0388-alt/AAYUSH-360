@@ -9,6 +9,7 @@ import subprocess
 import datetime
 import calendar
 import json
+import threading
 from typing import Dict, Any, List, Optional
 from src.database import DatabaseManager
 from src.extractor import extract_all_planners
@@ -23,8 +24,15 @@ class AppAPI:
         self.backlog_mgr = BacklogManager(db)
         self.pomodoro_sync = PomodoroSyncEngine(db)
         self.pomodoro_sync.start_watcher_if_enabled()
-        self.cloud_sync = CloudSyncEngine(db)
+        self.cloud_sync = CloudSyncEngine(db, pomodoro_sync=self.pomodoro_sync)
         self.cloud_sync.start_background_sync()
+
+        # Connect session commit callback to auto-sync
+        def _on_session_committed():
+            print("[AppAPI] Session committed callback: triggering cloud sync...")
+            threading.Thread(target=self.cloud_sync.sync_now, daemon=True).start()
+
+        self.pomodoro_sync.on_session_committed = _on_session_committed
 
     # ------------------ DASHBOARD & TODAY ------------------
 
@@ -425,6 +433,11 @@ class AppAPI:
 
     def cloud_sync_now(self) -> Dict[str, Any]:
         """Triggers an immediate bidirectional sync."""
+        if hasattr(self, 'pomodoro_sync') and self.pomodoro_sync:
+            try:
+                self.pomodoro_sync.flush_live_session(force=True)
+            except Exception as e:
+                print(f"[AppAPI] Warning: Failed to flush pomodoro live session before sync: {e}")
         return self.cloud_sync.sync_now()
 
     def get_mobile_pairing_payload(self) -> Dict[str, Any]:
