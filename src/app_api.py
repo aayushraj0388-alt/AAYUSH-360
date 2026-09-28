@@ -102,9 +102,12 @@ class AppAPI:
         """Returns the real-time live Pomodoro timer status."""
         return self.pomodoro_sync.get_live_status()
 
-    def delete_study_session(self, session_id: int) -> Dict[str, Any]:
+    def delete_study_session(self, session_id: Any) -> Dict[str, Any]:
         """Deletes an individual imported study session from AAYUSH 360."""
         success = self.db.delete_study_session(session_id)
+        if success and self.cloud_sync and self.cloud_sync.get_status().get('enabled'):
+            import threading
+            threading.Thread(target=self.cloud_sync.sync_now, kwargs={'timeout': 10.0}, daemon=True).start()
         return {'success': success}
 
     def set_pomodoro_source_path(self, path: str) -> Dict[str, Any]:

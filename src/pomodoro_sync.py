@@ -706,7 +706,7 @@ class PomodoroSyncEngine:
             conn = self.db.get_connection()
             c = conn.cursor()
 
-            base_filter = "AND (deleted_at IS NULL OR deleted_at = '')"
+            base_filter = "AND (deleted_at IS NULL OR deleted_at = '') AND (client_id IS NULL OR client_id NOT LIKE 'pch_%') AND (external_session_id IS NULL OR external_session_id NOT LIKE 'pch_%')"
 
             if activation_ts:
                 activation_date = activation_ts[:10]

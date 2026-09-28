@@ -983,6 +983,32 @@
     </form>
   </div>
 
+  <!-- 7. DELETE POMODORO SESSION CONFIRMATION MODAL -->
+  <div id="modal-delete-session" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-xl border border-slate-200">
+      <div class="flex items-center gap-3 text-rose-600">
+        <div class="p-2.5 bg-rose-50 rounded-xl border border-rose-200">
+          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        </div>
+        <div>
+          <h3 class="text-sm font-black text-slate-800">Delete Pomodoro Log</h3>
+          <p class="text-[11px] text-slate-500">Remove this session from study analytics.</p>
+        </div>
+      </div>
+      <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5 text-xs" id="delete-session-details">
+        <!-- Populated dynamically -->
+      </div>
+      <div class="flex gap-2 pt-1">
+        <button type="button" onclick="closeDeleteSessionModal()" class="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition cursor-pointer">
+          Cancel
+        </button>
+        <button type="button" id="btn-confirm-delete-session" onclick="executeDeleteStudySession()" class="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-sm cursor-pointer">
+          Delete Log
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- SCRIPTS -->
   <script src="assets/html5-qrcode.min.js"></script>
   <script src="seed_data.js"></script>

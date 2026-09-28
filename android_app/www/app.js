@@ -1037,20 +1037,25 @@ async function pullStoreChanges(storeName, userId, lastSyncTime) {
     } else {
       if (storeName === 'study_sessions') {
         // Study session conflict resolution:
+        // 1. If local session has a pending deletion, protect it against cloud overwrite!
+        if (existing.sync_status === 'pending' && existing.deleted_at) {
+          continue;
+        }
+
+        // 2. If cloud deletion arrives, cloud tombstone wins
         if (cloudItem.deleted_at) {
-          // Cloud deletion wins
           existing.deleted_at = cloudItem.deleted_at;
           existing.sync_status = 'synced';
           toSave.push(existing);
           continue;
         }
 
-        if (existing.sync_status === 'pending' && !existing.deleted_at && (Number(existing.duration_minutes) || 0) >= cloudItem.duration_minutes) {
-          // Local has greater or equal pending minutes and is not deleted — keep local
+        // 3. If local session has pending changes and not deleted, keep local data
+        if (existing.sync_status === 'pending' && (Number(existing.duration_minutes) || 0) >= cloudItem.duration_minutes) {
           continue;
         }
 
-        // Cloud is newer/greater or local is synced: accept cloudItem
+        // 4. Cloud is newer/greater or local is synced: accept cloudItem
         if (matchedByExternal && existing.client_id !== cloudItem.client_id) {
           // Delete old mismatched local ID to avoid duplicates
           await dbDelete('study_sessions', existing.client_id);
@@ -2797,12 +2802,17 @@ async function renderAnalyticsView() {
       recentContainer.innerHTML = studyData.recent_sessions.map(s => `
         <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
           <div>
-            <div class="font-bold text-slate-800">${s.subject || 'Study Session'}</div>
+            <div class="font-bold text-slate-800">${escapeHtml(s.subject || 'Study Session')}</div>
             <div class="text-[10px] text-slate-500">📅 ${s.date} ${s.start_time ? '• ' + s.start_time : ''}</div>
           </div>
-          <div class="text-right">
-            <div class="font-black text-amber-700">${formatDurationStr(s.duration_hours)}</div>
-            <div class="text-[10px] text-slate-400">${s.source || 'Pomodoro'}</div>
+          <div class="flex items-center gap-2.5">
+            <div class="text-right">
+              <div class="font-black text-amber-700">${formatDurationStr(s.duration_hours)}</div>
+              <div class="text-[10px] text-slate-400">${s.source || 'Pomodoro'}</div>
+            </div>
+            <button type="button" onclick="confirmDeleteStudySession('${s.client_id}')" class="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition active:scale-95 cursor-pointer" title="Delete session" aria-label="Delete session">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            </button>
           </div>
         </div>
       `).join('');
@@ -3114,6 +3124,72 @@ async function handleLogStudySubmit(e) {
   closeAllSheets();
   triggerDebouncedAutoSync();
   refreshCurrentView();
+}
+
+let sessionToDeleteClientId = null;
+
+async function confirmDeleteStudySession(clientId) {
+  if (!clientId) return;
+  const session = await dbGet('study_sessions', clientId);
+  if (!session) {
+    showToast('Session not found', 'error');
+    return;
+  }
+  sessionToDeleteClientId = clientId;
+  const detailElem = document.getElementById('delete-session-details');
+  if (detailElem) {
+    const mins = Number(session.duration_minutes) || Math.round((Number(session.duration_hours) || 0) * 60);
+    const durStr = formatDurationStr(session.duration_hours || (mins / 60));
+    detailElem.innerHTML = `
+      <div class="flex justify-between"><span class="text-slate-500 font-semibold">Subject:</span> <span class="font-bold text-slate-800">${escapeHtml(session.subject || 'Pomodoro Focus')}</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 font-semibold">Date:</span> <span class="font-bold text-slate-800">${session.date || ''} ${session.start_time ? '• ' + session.start_time : ''}</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 font-semibold">Duration:</span> <span class="font-black text-rose-600">${durStr} (${mins}m)</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 font-semibold">Source:</span> <span class="text-slate-600">${session.source || 'Pomodoro'}</span></div>
+    `;
+  }
+  const modal = document.getElementById('modal-delete-session');
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closeDeleteSessionModal() {
+  sessionToDeleteClientId = null;
+  const modal = document.getElementById('modal-delete-session');
+  if (modal) modal.classList.add('hidden');
+}
+
+async function executeDeleteStudySession() {
+  if (!sessionToDeleteClientId) return;
+  const clientId = sessionToDeleteClientId;
+  closeDeleteSessionModal();
+
+  try {
+    const session = await dbGet('study_sessions', clientId);
+    if (!session) {
+      showToast('Session not found', 'error');
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    session.deleted_at = nowIso;
+    session.sync_status = 'pending';
+    session.updated_at = nowIso;
+    await dbPut('study_sessions', session);
+
+    showToast('Pomodoro session deleted', 'info');
+
+    // Immediately update UI datasets
+    await renderDashboard();
+    await renderStudyAnalyticsView();
+
+    // Trigger cloud sync
+    triggerDebouncedAutoSync();
+    if (navigator.onLine && isCloudSyncConfigured()) {
+      syncNow().catch(err => console.warn('[Sync] Immediate sync after delete failed:', err));
+    }
+  } catch (err) {
+    console.error('Error deleting study session:', err);
+    showToast('Failed to delete session', 'error');
+  }
 }
 
 async function openEditWeeklyTargetsModal() {
