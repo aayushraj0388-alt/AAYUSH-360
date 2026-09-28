@@ -195,13 +195,16 @@ class AppAPI:
     def get_subjects_and_chapters(self) -> List[Dict[str, Any]]:
         return self.db.get_subjects_and_chapters()
 
-    def get_chapter_hours(self, chapter_id: int) -> Dict[str, Any]:
+    def get_chapter_hours(self, chapter_id: Any) -> Dict[str, Any]:
         """Returns completed hours and target hours for a Physical Chemistry chapter."""
         return self.db.get_chapter_hours(chapter_id)
 
-    def toggle_chapter_hour(self, chapter_id: int, hour_no: int) -> Dict[str, Any]:
+    def toggle_chapter_hour(self, chapter_id: Any, hour_no: Any = None) -> Dict[str, Any]:
         """Toggles an individual hour completion checkbox for a Physical Chemistry chapter."""
-        return self.db.toggle_chapter_hour(chapter_id, hour_no)
+        res = self.db.toggle_chapter_hour(chapter_id, hour_no)
+        if res.get('is_completed'):
+            self._update_streak()
+        return res
 
     def add_chapter(self, subject_id: int, chapter_name: str, target_hours: float = 0.0) -> Dict[str, Any]:
         conn = self.db.get_connection()
@@ -248,14 +251,16 @@ class AppAPI:
         JOIN subjects s ON l.subject_id = s.id
         WHERE ((l.scheduled_date >= ? AND l.scheduled_date <= ?)
             OR (l.rescheduled_date >= ? AND l.rescheduled_date <= ?))
-          AND l.is_archived = 0;
+          AND l.is_archived = 0
+          AND (l.deleted_at IS NULL OR l.deleted_at = '');
         """, (start_date, end_date, start_date, end_date)).fetchall()
 
         # Tests
         tests = c.execute("""
         SELECT id, test_name, test_type, test_date, status, score, total_marks
         FROM tests
-        WHERE test_date >= ? AND test_date <= ?;
+        WHERE test_date >= ? AND test_date <= ?
+          AND (deleted_at IS NULL OR deleted_at = '');
         """, (start_date, end_date)).fetchall()
 
         # Actual study hours from synchronized study_sessions
@@ -263,6 +268,7 @@ class AppAPI:
         SELECT date, SUM(duration_hours) as total_hours, SUM(duration_minutes) as total_minutes
         FROM study_sessions
         WHERE date >= ? AND date <= ?
+          AND (deleted_at IS NULL OR deleted_at = '')
         GROUP BY date;
         """, (start_date, end_date)).fetchall()
         actual_map = {r['date']: (r['total_hours'], r['total_minutes']) for r in actual_sessions}
@@ -318,6 +324,10 @@ class AppAPI:
     def update_test(self, test_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
         return self.db.update_test(test_id, data)
 
+    def update_test_score(self, test_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Alias for update_test invoked by the UI test modal."""
+        return self.update_test(test_id, data)
+
     def toggle_test_completion(self, test_id: int) -> Dict[str, Any]:
         """Toggles test status between completed and upcoming immediately on test day."""
         return self.db.toggle_test_completion(test_id)
@@ -352,6 +362,10 @@ class AppAPI:
             'rescheduled_count': redist_res.get('rescheduled_count', 0),
             'message': redist_res.get('message', '')
         }
+
+    def smart_backlog_redistribute(self, target_date: Optional[str] = None) -> Dict[str, Any]:
+        """Alias for scan_and_redistribute_backlog invoked by the UI."""
+        return self.scan_and_redistribute_backlog(target_date)
 
     # ------------------ BACKUPS & IMPORT/EXPORT ------------------
 

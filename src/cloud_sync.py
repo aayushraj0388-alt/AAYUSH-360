@@ -327,8 +327,9 @@ class CloudSyncEngine:
                 conn.execute("UPDATE chapters SET sync_status = 'synced' WHERE sync_status = 'pending'")
                 total_pushed += len(payload)
 
-            # 3. LECTURES
-            cur = conn.execute("SELECT * FROM lectures WHERE sync_status = 'pending'")
+            # 3. LECTURES (Physical Chemistry is hour-based and has NO lectures)
+            conn.execute("UPDATE lectures SET sync_status = 'synced' WHERE sync_status = 'pending' AND (subject_client_id = 'subj_physical_chemistry' OR subject_id = 3)")
+            cur = conn.execute("SELECT * FROM lectures WHERE sync_status = 'pending' AND subject_client_id != 'subj_physical_chemistry' AND (subject_id IS NULL OR subject_id != 3)")
             rows = [dict(r) for r in cur.fetchall()]
             if rows:
                 print(f"[CloudSync] Pushing {len(rows)} lectures...")

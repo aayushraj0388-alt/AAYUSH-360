@@ -3368,16 +3368,19 @@ class DatabaseManager:
             subj_id = subj_row['id'] if subj_row else 1
 
             existing = c.execute("SELECT id FROM chapters WHERE client_id = ?", (client_id,)).fetchone()
+            if not existing and r.get('name'):
+                existing = c.execute("SELECT id FROM chapters WHERE subject_id = ? AND name = ?", (subj_id, r.get('name'))).fetchone()
+
             if existing:
                 if deleted_at:
-                    c.execute("UPDATE chapters SET deleted_at = ?, sync_status = 'synced' WHERE client_id = ?", (deleted_at, client_id))
+                    c.execute("UPDATE chapters SET deleted_at = ?, sync_status = 'synced' WHERE id = ?", (deleted_at, existing['id']))
                 else:
                     c.execute("""
                         UPDATE chapters SET
-                            subject_id = ?, subject_client_id = ?, name = ?,
+                            client_id = ?, subject_id = ?, subject_client_id = ?, name = ?,
                             sequence_no = ?, target_hours = ?, sync_status = 'synced'
-                        WHERE client_id = ?
-                    """, (subj_id, subj_cid, r.get('name'), r.get('sequence_no', 0), r.get('target_hours', 0), client_id))
+                        WHERE id = ?
+                    """, (client_id, subj_id, subj_cid, r.get('name'), r.get('sequence_no', 0), r.get('target_hours', 0), existing['id']))
             else:
                 if not deleted_at:
                     c.execute("""
@@ -3402,6 +3405,10 @@ class DatabaseManager:
             chap_row = c.execute("SELECT id FROM chapters WHERE client_id = ?", (chap_cid,)).fetchone()
             subj_id = subj_row['id'] if subj_row else 1
             chap_id = chap_row['id'] if chap_row else 1
+
+            # Physical Chemistry has no lectures in architecture. Ignore any cloud lecture sync.
+            if subj_cid == 'subj_physical_chemistry' or subj_id == 3:
+                continue
 
             existing = c.execute("SELECT id, is_completed, is_dpp_completed, sync_status FROM lectures WHERE client_id = ?", (client_id,)).fetchone()
             is_comp = 1 if r.get('is_completed') else 0
@@ -3555,12 +3562,16 @@ class DatabaseManager:
             src = r.get('source', 'Pomodoro')
             ext_id = r.get('external_session_id')
             existing = c.execute("""
-                SELECT id FROM study_sessions 
+                SELECT id, sync_status FROM study_sessions 
                 WHERE client_id = ? 
                    OR (external_session_id IS NOT NULL AND external_session_id != '' AND source = ? AND external_session_id = ?)
             """, (client_id, src, ext_id)).fetchone()
             
             if existing:
+                # If local session has pending changes, keep local data
+                if existing['sync_status'] == 'pending':
+                    continue
+
                 c.execute("""
                     UPDATE study_sessions SET
                         client_id = ?, source = ?, external_session_id = ?, date = ?, start_time = ?, end_time = ?,

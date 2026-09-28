@@ -313,7 +313,7 @@ async function migrateChapterSequenceNumbers() {
     const localLectures = await dbGetAll('lectures');
     const localSubjects = await dbGetAll('subjects');
 
-    const migrationVersion = '2026-09-28-v5-audit-repair';
+    const migrationVersion = '2026-09-28-v6-audit-repair';
     const done = await getSetting('chapter_seq_migration', '');
     if (done === migrationVersion && localChapters.length === 91 && localLectures.length >= 398) {
       return; // Already up to date
@@ -1265,19 +1265,27 @@ async function calculateStudyAnalytics(timeFilter = 'all_time') {
 // 6. VIEW CONTROLLER & NAVIGATION
 // ============================================================================
 
+let currentPChemChapterId = null;
+
 function switchView(viewName, param = null) {
   currentView = viewName;
-  ['dashboard', 'subjects', 'lectures', 'practice', 'analytics'].forEach(v => {
+  ['dashboard', 'subjects', 'pchem', 'lectures', 'practice', 'analytics'].forEach(v => {
     const elem = document.getElementById(`view-${v}`);
     if (elem) elem.classList.toggle('hidden', v !== viewName);
   });
 
   document.querySelectorAll('.bottom-nav-item').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('data-view') === viewName);
+    const btnView = btn.getAttribute('data-view');
+    const isActive = btnView === viewName || (viewName === 'pchem' && btnView === 'subjects');
+    btn.classList.toggle('active', isActive);
   });
 
   if (viewName === 'dashboard') renderDashboard();
   if (viewName === 'subjects') renderSubjectsView();
+  if (viewName === 'pchem') {
+    if (typeof param === 'string') currentPChemChapterId = param;
+    renderPChemHourTracker(currentPChemChapterId);
+  }
   if (viewName === 'lectures') {
     if (param === 'backlog') {
       currentLectureStatusFilter = 'backlog';
@@ -1299,15 +1307,17 @@ function switchView(viewName, param = null) {
 }
 
 function refreshCurrentView() {
-  switchView(currentView);
+  switchView(currentView, currentView === 'pchem' ? currentPChemChapterId : activeChapterFilter);
 }
 
 // Helper to extract completed hour numbers for a Physical Chemistry chapter
-function getChapterCompletedHours(sessions, chapterName) {
+function getChapterCompletedHours(sessions, chapter) {
+  const chapterName = typeof chapter === 'string' ? chapter : (chapter ? chapter.name : '');
+  const chapterId = typeof chapter === 'object' && chapter ? chapter.client_id : (typeof chapter === 'string' ? chapter : '');
   const activeSessions = (sessions || []).filter(s => 
     !s.deleted_at && 
     (s.subject && (s.subject.includes('Physical') || s.subject === 'Physical Chemistry')) &&
-    s.chapter === chapterName
+    (s.chapter === chapterName || (chapterId && (s.client_id?.includes(chapterId) || s.external_session_id?.includes(chapterId))))
   );
   const hourSet = new Set();
   activeSessions.forEach(s => {
@@ -1592,27 +1602,197 @@ async function renderSubjectsView() {
       tabsContainer.innerHTML += `
         <div class="w-full flex gap-1.5 pt-1.5 border-t border-slate-200/80 overflow-x-auto scrollbar-none">
           <button onclick="setChemistryBranch('all')" class="pill text-[11px] ${currentChemistryBranch === 'all' ? 'bg-amber-600 text-white font-bold' : 'bg-amber-50 text-amber-900 border border-amber-200'} whitespace-nowrap">
-            All Chem
+            All Chem (30)
           </button>
           <button onclick="setChemistryBranch('physical')" class="pill text-[11px] ${currentChemistryBranch === 'physical' ? 'bg-amber-600 text-white font-bold' : 'bg-amber-50 text-amber-900 border border-amber-200'} whitespace-nowrap">
-            Physical (Hours)
+            Physical (9 ch &bull; 68h)
           </button>
           <button onclick="setChemistryBranch('inorganic')" class="pill text-[11px] ${currentChemistryBranch === 'inorganic' ? 'bg-amber-600 text-white font-bold' : 'bg-amber-50 text-amber-900 border border-amber-200'} whitespace-nowrap">
-            Inorganic
+            Inorganic (9 ch)
           </button>
           <button onclick="setChemistryBranch('organic')" class="pill text-[11px] ${currentChemistryBranch === 'organic' ? 'bg-amber-600 text-white font-bold' : 'bg-amber-50 text-amber-900 border border-amber-200'} whitespace-nowrap">
-            Organic
+            Organic (12 ch)
           </button>
         </div>
       `;
     }
   }
 
-  // Filter chapters based on selected subject / chemistry branch
+  const chaptersContainer = document.getElementById('chapters-list-container');
+  if (!chaptersContainer) return;
+
+  // CASE 1: ALL SUBJECTS VIEW
+  // Displays the 3 main subject cards (Physics, Mathematics, Chemistry)
+  // Chemistry card explicitly exposes the 3 branches: Physical (Hour-based), Inorganic (Lecture-based), Organic (Lecture-based)
+  if (currentSubjectFilter === 'all') {
+    const activeLectures = lectures.filter(l => !l.deleted_at);
+
+    // Physics Stats (33 chapters)
+    const phyLectures = activeLectures.filter(l => l.subject_client_id === 'subj_physics');
+    const phyDone = phyLectures.filter(l => l.is_completed).length;
+    const phyPct = phyLectures.length > 0 ? Math.round((phyDone / phyLectures.length) * 100) : 0;
+
+    // Maths Stats (28 chapters)
+    const mathLectures = activeLectures.filter(l => l.subject_client_id === 'subj_mathematics');
+    const mathDone = mathLectures.filter(l => l.is_completed).length;
+    const mathPct = mathLectures.length > 0 ? Math.round((mathDone / mathLectures.length) * 100) : 0;
+
+    // Chemistry Branches:
+    // 1. Physical Chemistry: 9 chapters, 68 hours (Hour-based)
+    const pcSessions = (studySessions || []).filter(s => 
+      !s.deleted_at && (s.subject && (s.subject.includes('Physical') || s.subject === 'Physical Chemistry'))
+    );
+    const pcCompletedHours = pcSessions.length;
+    const pcTotalHours = 68;
+    const pcPct = Math.round((pcCompletedHours / pcTotalHours) * 100);
+
+    // 2. Inorganic Chemistry: 9 chapters (Lecture-based)
+    const iocLectures = activeLectures.filter(l => l.subject_client_id === 'subj_inorganic_chemistry');
+    const iocDone = iocLectures.filter(l => l.is_completed).length;
+    const iocPct = iocLectures.length > 0 ? Math.round((iocDone / iocLectures.length) * 100) : 0;
+
+    // 3. Organic Chemistry: 12 chapters (Lecture-based)
+    const ocLectures = activeLectures.filter(l => l.subject_client_id === 'subj_organic_chemistry');
+    const ocDone = ocLectures.filter(l => l.is_completed).length;
+    const ocPct = ocLectures.length > 0 ? Math.round((ocDone / ocLectures.length) * 100) : 0;
+
+    chaptersContainer.innerHTML = `
+      <div class="space-y-3.5">
+        <!-- 1. PHYSICS CARD -->
+        <div class="touch-card p-4 space-y-3 border-l-4 border-indigo-600 cursor-pointer transition active:scale-99" onclick="setMainSubjectFilter('subj_physics')">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-sm">
+                PHY
+              </div>
+              <div>
+                <h3 class="text-sm font-black text-slate-900">Physics</h3>
+                <span class="text-[11px] text-slate-500 font-semibold">33 Chapters &bull; Lecture-based</span>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="text-sm font-black text-indigo-600">${phyPct}%</span>
+              <div class="text-[11px] text-slate-400 font-bold">${phyDone}/${phyLectures.length} Lecs</div>
+            </div>
+          </div>
+          <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-300 bg-indigo-600" style="width: ${phyPct}%"></div>
+          </div>
+        </div>
+
+        <!-- 2. MATHEMATICS CARD -->
+        <div class="touch-card p-4 space-y-3 border-l-4 border-emerald-600 cursor-pointer transition active:scale-99" onclick="setMainSubjectFilter('subj_mathematics')">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-black text-sm">
+                MTH
+              </div>
+              <div>
+                <h3 class="text-sm font-black text-slate-900">Mathematics</h3>
+                <span class="text-[11px] text-slate-500 font-semibold">28 Chapters &bull; Lecture-based</span>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="text-sm font-black text-emerald-600">${mathPct}%</span>
+              <div class="text-[11px] text-slate-400 font-bold">${mathDone}/${mathLectures.length} Lecs</div>
+            </div>
+          </div>
+          <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-300 bg-emerald-600" style="width: ${mathPct}%"></div>
+          </div>
+        </div>
+
+        <!-- 3. CHEMISTRY CARD WITH 3 EXPLICIT BRANCHES -->
+        <div class="touch-card p-4 space-y-3.5 border-l-4 border-amber-600">
+          <div class="flex items-center justify-between cursor-pointer" onclick="setMainSubjectFilter('chemistry')">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-black text-sm">
+                CHM
+              </div>
+              <div>
+                <h3 class="text-sm font-black text-slate-900">Chemistry</h3>
+                <span class="text-[11px] text-slate-500 font-semibold">30 Chapters across 3 Branches</span>
+              </div>
+            </div>
+            <button onclick="event.stopPropagation(); setMainSubjectFilter('chemistry');" class="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+              View All &rarr;
+            </button>
+          </div>
+
+          <!-- The 3 Explicit Chemistry Branches -->
+          <div class="space-y-2 pt-1 border-t border-slate-100">
+            <!-- Branch A: Physical Chemistry (Hour-based) -->
+            <div class="p-3 bg-amber-50/70 border border-amber-200 rounded-xl cursor-pointer hover:bg-amber-100/60 transition" onclick="setChemistryBranch('physical')">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-black text-amber-950">Physical Chemistry</span>
+                    <span class="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-200 text-amber-900">Hour-based</span>
+                  </div>
+                  <div class="text-[10px] text-amber-800 font-medium mt-0.5">9 Chapters &bull; 68 Target Hours</div>
+                </div>
+                <div class="text-right">
+                  <span class="text-xs font-black text-amber-800">${pcPct}%</span>
+                  <div class="text-[10px] text-amber-700 font-bold">${pcCompletedHours}/${pcTotalHours} Hours</div>
+                </div>
+              </div>
+              <div class="w-full h-1.5 bg-amber-200/60 rounded-full overflow-hidden mt-2">
+                <div class="h-full rounded-full transition-all duration-300 bg-amber-500" style="width: ${pcPct}%"></div>
+              </div>
+            </div>
+
+            <!-- Branch B: Inorganic Chemistry (Lecture-based) -->
+            <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition" onclick="setChemistryBranch('inorganic')">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-black text-slate-800">Inorganic Chemistry</span>
+                    <span class="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">Lecture-based</span>
+                  </div>
+                  <div class="text-[10px] text-slate-500 font-medium mt-0.5">9 Chapters &bull; ${iocLectures.length} Lectures</div>
+                </div>
+                <div class="text-right">
+                  <span class="text-xs font-black text-slate-700">${iocPct}%</span>
+                  <div class="text-[10px] text-slate-400 font-bold">${iocDone}/${iocLectures.length} Lecs</div>
+                </div>
+              </div>
+              <div class="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden mt-2">
+                <div class="h-full rounded-full transition-all duration-300 bg-slate-600" style="width: ${iocPct}%"></div>
+              </div>
+            </div>
+
+            <!-- Branch C: Organic Chemistry (Lecture-based) -->
+            <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition" onclick="setChemistryBranch('organic')">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-black text-slate-800">Organic Chemistry</span>
+                    <span class="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">Lecture-based</span>
+                  </div>
+                  <div class="text-[10px] text-slate-500 font-medium mt-0.5">12 Chapters &bull; ${ocLectures.length} Lectures</div>
+                </div>
+                <div class="text-right">
+                  <span class="text-xs font-black text-slate-700">${ocPct}%</span>
+                  <div class="text-[10px] text-slate-400 font-bold">${ocDone}/${ocLectures.length} Lecs</div>
+                </div>
+              </div>
+              <div class="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden mt-2">
+                <div class="h-full rounded-full transition-all duration-300 bg-slate-600" style="width: ${ocPct}%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
+
+  // CASE 2: FILTERED CHAPTERS VIEW (Physics, Mathematics, or Chemistry branches)
   const filteredChapters = chapters.filter(ch => {
     if (ch.deleted_at) return false;
 
-    if (currentSubjectFilter === 'all') return true;
     if (currentSubjectFilter === 'subj_physics') return ch.subject_client_id === 'subj_physics';
     if (currentSubjectFilter === 'subj_mathematics') return ch.subject_client_id === 'subj_mathematics';
 
@@ -1636,53 +1816,50 @@ async function renderSubjectsView() {
     return (a.sequence_no || 0) - (b.sequence_no || 0);
   });
 
-  const chaptersContainer = document.getElementById('chapters-list-container');
-  if (chaptersContainer) {
-    if (filteredChapters.length === 0) {
-      chaptersContainer.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs">No chapters found for this selection.</div>`;
-    } else {
-      chaptersContainer.innerHTML = filteredChapters.map(ch => {
-        const parentSub = subjects.find(s => s.client_id === ch.subject_client_id);
-        const isHoursBased = parentSub && parentSub.target_type === 'hours';
+  if (filteredChapters.length === 0) {
+    chaptersContainer.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs">No chapters found for this selection.</div>`;
+  } else {
+    chaptersContainer.innerHTML = filteredChapters.map(ch => {
+      const parentSub = subjects.find(s => s.client_id === ch.subject_client_id);
+      const isHoursBased = parentSub && parentSub.target_type === 'hours';
 
-        let doneCount = 0;
-        let totalCount = 0;
-        let unit = 'Lecs';
+      let doneCount = 0;
+      let totalCount = 0;
+      let unit = 'Lecs';
 
-        if (isHoursBased) {
-          const completedSet = getChapterCompletedHours(studySessions, ch.name);
-          doneCount = completedSet.size;
-          totalCount = ch.target_hours || 0;
-          unit = 'Hours';
-        } else {
-          const chLectures = lectures.filter(l => !l.deleted_at && l.chapter_client_id === ch.client_id);
-          doneCount = chLectures.filter(l => l.is_completed).length;
-          totalCount = chLectures.length;
-          unit = 'Lecs';
-        }
+      if (isHoursBased) {
+        const completedSet = getChapterCompletedHours(studySessions, ch);
+        doneCount = completedSet.size;
+        totalCount = ch.target_hours || 0;
+        unit = 'Hours';
+      } else {
+        const chLectures = lectures.filter(l => !l.deleted_at && l.chapter_client_id === ch.client_id);
+        doneCount = chLectures.filter(l => l.is_completed).length;
+        totalCount = chLectures.length;
+        unit = 'Lecs';
+      }
 
-        const pct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
-        const color = parentSub ? parentSub.color : '#4f46e5';
+      const pct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+      const color = parentSub ? parentSub.color : '#4f46e5';
 
-        return `
-          <div class="touch-card p-3.5 space-y-2 border-l-4 transition active:scale-99 cursor-pointer" style="border-left-color: ${color}" onclick="filterLecturesByChapter('${ch.client_id}')">
-            <div class="flex items-center justify-between">
-              <div>
-                <span class="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">CH ${ch.sequence_no || '?'}</span>
-                <h3 class="text-xs font-bold text-slate-800 mt-1">${ch.name}</h3>
-              </div>
-              <div class="text-right">
-                <span class="text-xs font-black" style="color: ${color}">${pct}%</span>
-                <div class="text-[10px] text-slate-400">${doneCount}/${totalCount} ${unit}</div>
-              </div>
+      return `
+        <div class="touch-card p-3.5 space-y-2 border-l-4 transition active:scale-99 cursor-pointer" style="border-left-color: ${color}" onclick="openChapter('${ch.client_id}')">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">CH ${ch.sequence_no != null ? ch.sequence_no : ''}</span>
+              <h3 class="text-xs font-bold text-slate-800 mt-1">${ch.name}</h3>
             </div>
-            <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-              <div class="h-full rounded-full transition-all duration-300" style="width: ${pct}%; background-color: ${color}"></div>
+            <div class="text-right">
+              <span class="text-xs font-black" style="color: ${color}">${pct}%</span>
+              <div class="text-[10px] text-slate-400">${doneCount}/${totalCount} ${unit}</div>
             </div>
           </div>
-        `;
-      }).join('');
-    }
+          <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-300" style="width: ${pct}%; background-color: ${color}"></div>
+          </div>
+        </div>
+      `;
+    }).join('');
   }
 
   if (window.lucide) lucide.createIcons();
@@ -1707,9 +1884,21 @@ function filterSubjectChapters(subId) {
   renderSubjectsView();
 }
 
+async function openChapter(chId) {
+  const chapters = await dbGetAll('chapters');
+  const ch = chapters.find(c => c.client_id === chId);
+  if (!ch) return;
+  if (ch.subject_client_id === 'subj_physical_chemistry') {
+    currentPChemChapterId = chId;
+    switchView('pchem', chId);
+  } else {
+    activeChapterFilter = chId;
+    switchView('lectures', chId);
+  }
+}
+
 function filterLecturesByChapter(chId) {
-  activeChapterFilter = chId;
-  switchView('lectures', chId);
+  openChapter(chId);
 }
 
 function clearChapterFilter() {
@@ -1717,131 +1906,257 @@ function clearChapterFilter() {
   renderSubjectsView();
 }
 
-// ---------------- LECTURES & HOURS CHECKLIST ----------------
+// ---------------- PHYSICAL CHEMISTRY HOUR TRACKER (HOUR-BASED ONLY) ----------------
+async function renderPChemHourTracker(targetChapterId = null) {
+  const chapters = await dbGetAll('chapters');
+  const subjects = await dbGetAll('subjects');
+  const studySessions = await dbGetAll('study_sessions');
+
+  const container = document.getElementById('pchem-hours-container');
+  if (!container) return;
+
+  const pchemChapters = chapters
+    .filter(c => !c.deleted_at && c.subject_client_id === 'subj_physical_chemistry')
+    .sort((a, b) => (a.sequence_no || 0) - (b.sequence_no || 0));
+
+  let activeChapter = null;
+  if (targetChapterId) {
+    activeChapter = pchemChapters.find(c => c.client_id === targetChapterId);
+  }
+  if (!activeChapter && pchemChapters.length > 0) {
+    activeChapter = pchemChapters[0];
+  }
+
+  if (!activeChapter) {
+    container.innerHTML = `
+      <div class="text-center py-10 text-slate-400 text-xs">
+        No Physical Chemistry chapters found.
+      </div>
+    `;
+    return;
+  }
+
+  currentPChemChapterId = activeChapter.client_id;
+  const targetHours = activeChapter.target_hours || 0;
+  const completedSet = getChapterCompletedHours(studySessions, activeChapter);
+  const completedCount = completedSet.size;
+  const pct = targetHours > 0 ? Math.round((completedCount / targetHours) * 100) : 0;
+
+  container.innerHTML = `
+    <!-- Top Action & Navigation Bar -->
+    <div class="flex items-center justify-between gap-2">
+      <button onclick="switchView('subjects')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 active:scale-95 transition">
+        <i data-lucide="arrow-left" class="w-4 h-4"></i> Chapters
+      </button>
+
+      <!-- Chapter Switcher Dropdown (1 to 9) -->
+      <select onchange="renderPChemHourTracker(this.value)" class="bg-white border border-amber-300 rounded-xl px-2.5 py-1.5 text-xs font-bold text-amber-950 focus:outline-amber-500 shadow-xs max-w-[200px] truncate">
+        ${pchemChapters.map(c => `
+          <option value="${c.client_id}" ${c.client_id === activeChapter.client_id ? 'selected' : ''}>
+            CH ${c.sequence_no}: ${c.name} (${c.target_hours}h)
+          </option>
+        `).join('')}
+      </select>
+    </div>
+
+    <!-- Chapter Info Card -->
+    <div class="card-amber p-4 space-y-2 rounded-2xl">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] font-black text-amber-800 uppercase tracking-wider">
+          PHYSICAL CHEMISTRY &bull; CHAPTER ${activeChapter.sequence_no}
+        </span>
+        <span class="pill bg-amber-200/80 text-amber-950 font-black text-[11px]">
+          ${completedCount} / ${targetHours} Hours (${pct}%)
+        </span>
+      </div>
+      <h2 class="text-base font-black text-amber-950">${activeChapter.name}</h2>
+      <div class="text-xs text-amber-800 font-semibold">
+        Hour-based tracking &bull; Target: ${targetHours} hours
+      </div>
+      <div class="w-full h-2 bg-amber-200/60 rounded-full overflow-hidden mt-1">
+        <div class="h-full rounded-full transition-all duration-300 bg-amber-500" style="width: ${pct}%;"></div>
+      </div>
+    </div>
+
+    <!-- Hour Checklist (1 to target_hours) -->
+    <div class="space-y-2 pt-1">
+      <div class="text-xs font-black text-slate-700 uppercase tracking-wider px-1">
+        Hour-by-Hour Checklist
+      </div>
+      ${Array.from({ length: targetHours }, (_, i) => i + 1).map(hNum => {
+        const isDone = completedSet.has(hNum);
+        return `
+          <div class="touch-card p-3 flex items-center justify-between gap-3 ${isDone ? 'bg-amber-50/70 border-amber-300' : 'bg-white'} cursor-pointer transition active:scale-99" onclick="toggleChapterHour('${activeChapter.client_id}', ${hNum})">
+            <div class="flex items-center gap-3">
+              <div class="touch-checkbox ${isDone ? 'checked' : ''}" style="${isDone ? 'background-color: #f59e0b; border-color: #f59e0b;' : ''}">
+                ${isDone ? '✓' : ''}
+              </div>
+              <span class="text-sm ${isDone ? 'text-amber-950 font-black' : 'text-slate-800 font-semibold'}">
+                ${hNum} hour${hNum > 1 ? 's' : ''}
+              </span>
+            </div>
+            <span class="text-[11px] font-bold ${isDone ? 'text-amber-700' : 'text-slate-400'}">
+              ${isDone ? 'Completed' : 'Pending'}
+            </span>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+
+  if (window.lucide) lucide.createIcons();
+}
+
+// ---------------- LECTURE-BASED SUBJECTS CHECKLIST (NO PHYSICAL CHEMISTRY) ----------------
 async function renderLecturesList(targetChapterId = null) {
-  const chId = targetChapterId !== null ? targetChapterId : activeChapterFilter;
   const lectures = await dbGetAll('lectures');
   const subjects = await dbGetAll('subjects');
   const chapters = await dbGetAll('chapters');
-  const studySessions = await dbGetAll('study_sessions');
 
   const container = document.getElementById('lectures-container');
   if (!container) return;
 
-  let activeChapterObj = null;
-  if (chId) {
-    activeChapterObj = chapters.find(c => c.client_id === chId);
+  // STRICT RULE: Physical Chemistry is NEVER rendered in Lectures view!
+  if (targetChapterId) {
+    const chObj = chapters.find(c => c.client_id === targetChapterId);
+    if (chObj && chObj.subject_client_id === 'subj_physical_chemistry') {
+      switchView('pchem', targetChapterId);
+      return;
+    }
   }
 
-  // If no chapter selected, default to first chapter of active filter
-  if (!activeChapterObj && chapters.length > 0) {
-    activeChapterObj = chapters.find(c => !c.deleted_at);
+  // All lecture-based chapters
+  const lectureChapters = chapters
+    .filter(c => !c.deleted_at && c.subject_client_id !== 'subj_physical_chemistry');
+
+  let activeChapterObj = null;
+  const chId = targetChapterId !== null ? targetChapterId : activeChapterFilter;
+  if (chId) {
+    activeChapterObj = lectureChapters.find(c => c.client_id === chId);
+  }
+
+  // If no chapter selected, default to Physics Chapter 1 (never Physical Chemistry!)
+  if (!activeChapterObj) {
+    activeChapterObj = lectureChapters.find(c => c.subject_client_id === 'subj_physics' && c.sequence_no === 1) || lectureChapters[0];
   }
 
   if (!activeChapterObj) {
-    container.innerHTML = `<div class="text-center py-10 text-slate-400 text-xs">No chapter selected. Go to Subjects and tap a chapter.</div>`;
+    container.innerHTML = `<div class="text-center py-10 text-slate-400 text-xs">No lecture chapters found. Go to Syllabus and select a chapter.</div>`;
     return;
   }
 
+  activeChapterFilter = activeChapterObj.client_id;
   const parentSub = subjects.find(s => s.client_id === activeChapterObj.subject_client_id);
-  const isHoursBased = parentSub && parentSub.target_type === 'hours';
   const color = parentSub ? parentSub.color : '#4f46e5';
 
-  // 1. PHYSICAL CHEMISTRY HOURS CHECKLIST
-  if (isHoursBased) {
-    const targetHours = activeChapterObj.target_hours || 0;
-    const completedSet = getChapterCompletedHours(studySessions, activeChapterObj.name);
-    const completedCount = completedSet.size;
-    const pct = targetHours > 0 ? Math.round((completedCount / targetHours) * 100) : 0;
+  // Chapters of the same subject for dropdown switcher
+  const siblingChapters = lectureChapters
+    .filter(c => c.subject_client_id === activeChapterObj.subject_client_id)
+    .sort((a, b) => (a.sequence_no || 0) - (b.sequence_no || 0));
 
-    let hoursHtml = `
-      <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-3 flex items-center justify-between">
-        <div>
-          <div class="text-[10px] font-black text-amber-700 uppercase tracking-wider">${parentSub ? parentSub.display_name : 'Physical Chemistry'} &bull; CH ${activeChapterObj.sequence_no}</div>
-          <h2 class="text-sm font-black text-slate-900 mt-0.5">${activeChapterObj.name}</h2>
-          <div class="text-xs font-bold text-amber-800 mt-1">${completedCount} / ${targetHours} Hours Completed (${pct}%)</div>
-        </div>
-        <button onclick="switchView('subjects')" class="px-3 py-1.5 rounded-xl bg-amber-600 text-white text-xs font-bold shadow-xs">
-          Chapters
-        </button>
-      </div>
-
-      <div class="space-y-2">
-        ${Array.from({ length: targetHours }, (_, i) => i + 1).map(hNum => {
-          const isDone = completedSet.has(hNum);
-          return `
-            <div class="touch-card p-3 flex items-center justify-between gap-3 ${isDone ? 'bg-amber-50/70 border-amber-300' : 'bg-white'} cursor-pointer" onclick="toggleChapterHour('${activeChapterObj.client_id}', ${hNum})">
-              <div class="flex items-center gap-3">
-                <div class="touch-checkbox ${isDone ? 'checked' : ''}" style="${isDone ? 'background-color: #f59e0b; border-color: #f59e0b;' : ''}">
-                  ${isDone ? '✓' : ''}
-                </div>
-                <span class="text-sm font-bold ${isDone ? 'text-amber-950 font-black' : 'text-slate-800'}">
-                  ${hNum} hour${hNum > 1 ? 's' : ''}
-                </span>
-              </div>
-            </div>
-          `;
-        }).join('')}
-      </div>
-    `;
-
-    container.innerHTML = hoursHtml;
-    if (window.lucide) lucide.createIcons();
-    return;
+  // Populate subject filter dropdown with ONLY lecture-based subjects
+  const subSelect = document.getElementById('lecture-subject-filter');
+  if (subSelect && subSelect.options.length <= 1) {
+    const lectureSubjects = subjects.filter(s => !s.deleted_at && s.target_type === 'lectures');
+    subSelect.innerHTML = `<option value="all">All Lecture Subjects</option>` + lectureSubjects.map(s => `
+      <option value="${s.client_id}">${s.display_name || s.name}</option>
+    `).join('');
   }
 
-  // 2. STANDARD LECTURE CHECKLIST (Physics, Maths, Inorganic, Organic)
-  const chapterLectures = lectures.filter(l => !l.deleted_at && l.chapter_client_id === activeChapterObj.client_id)
-                                  .sort((a, b) => (a.lecture_no || 0) - (b.lecture_no || 0));
+  // Get and sort lectures
+  let chapterLectures = lectures
+    .filter(l => !l.deleted_at && l.chapter_client_id === activeChapterObj.client_id)
+    .sort((a, b) => (a.lecture_no || 0) - (b.lecture_no || 0));
 
   const completedLecs = chapterLectures.filter(l => l.is_completed).length;
   const completedDpps = chapterLectures.filter(l => l.is_dpp_completed).length;
   const pct = chapterLectures.length > 0 ? Math.round((completedLecs / chapterLectures.length) * 100) : 0;
 
+  // Filter by search / status if applicable
+  const searchInput = document.getElementById('lecture-search-input');
+  const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+  let displayLectures = chapterLectures;
+
+  if (query) {
+    displayLectures = displayLectures.filter(l => 
+      (l.lecture_name && l.lecture_name.toLowerCase().includes(query)) ||
+      (l.topic && l.topic.toLowerCase().includes(query)) ||
+      String(l.lecture_no).includes(query)
+    );
+  }
+
+  if (currentLectureStatusFilter === 'pending') {
+    displayLectures = displayLectures.filter(l => !l.is_completed);
+  } else if (currentLectureStatusFilter === 'completed') {
+    displayLectures = displayLectures.filter(l => l.is_completed);
+  }
+
   let headerHtml = `
-    <div class="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 mb-3 flex items-center justify-between">
-      <div>
-        <div class="text-[10px] font-black text-indigo-600 uppercase tracking-wider">${parentSub ? parentSub.display_name : 'Subject'} &bull; CH ${activeChapterObj.sequence_no}</div>
-        <h2 class="text-sm font-black text-slate-900 mt-0.5">${activeChapterObj.name}</h2>
-        <div class="text-xs font-bold text-slate-600 mt-1">
-          <span class="text-indigo-700 font-extrabold">${completedLecs}/${chapterLectures.length} Lectures</span> &bull; 
-          <span class="text-amber-700 font-extrabold">${completedDpps}/${chapterLectures.length} DPPs</span>
-        </div>
-      </div>
-      <button onclick="switchView('subjects')" class="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow-xs">
-        Chapters
+    <!-- Top Nav: Return button + Chapter Switcher -->
+    <div class="flex items-center justify-between gap-2 mb-2">
+      <button onclick="switchView('subjects')" class="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 active:scale-95 transition">
+        <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> Chapters
       </button>
+
+      <select onchange="openChapter(this.value)" class="bg-white border border-indigo-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-indigo-950 focus:outline-indigo-500 shadow-xs max-w-[200px] truncate">
+        ${siblingChapters.map(c => `
+          <option value="${c.client_id}" ${c.client_id === activeChapterObj.client_id ? 'selected' : ''}>
+            CH ${c.sequence_no}: ${c.name}
+          </option>
+        `).join('')}
+      </select>
+    </div>
+
+    <!-- Chapter Header Card -->
+    <div class="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 mb-3">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] font-black text-indigo-600 uppercase tracking-wider">
+          ${parentSub ? (parentSub.display_name || parentSub.name) : 'Subject'} &bull; CH ${activeChapterObj.sequence_no}
+        </span>
+        <span class="text-xs font-black text-indigo-700">${pct}%</span>
+      </div>
+      <h2 class="text-sm font-black text-slate-900 mt-0.5">${activeChapterObj.name}</h2>
+      <div class="text-xs font-bold text-slate-600 mt-1">
+        <span class="text-indigo-700 font-extrabold">${completedLecs}/${chapterLectures.length} Lectures</span> &bull; 
+        <span class="text-amber-700 font-extrabold">${completedDpps}/${chapterLectures.length} DPPs</span>
+      </div>
+      <div class="w-full h-1.5 bg-indigo-200/60 rounded-full overflow-hidden mt-2">
+        <div class="h-full rounded-full transition-all duration-300 bg-indigo-600" style="width: ${pct}%;"></div>
+      </div>
     </div>
   `;
 
-  if (chapterLectures.length === 0) {
-    container.innerHTML = headerHtml + `<div class="text-center py-10 text-slate-400 text-xs">No lectures found in this chapter.</div>`;
+  if (displayLectures.length === 0) {
+    container.innerHTML = headerHtml + `<div class="text-center py-8 text-slate-400 text-xs">No lectures matching filter.</div>`;
   } else {
     container.innerHTML = headerHtml + `
       <div class="space-y-2">
-        ${chapterLectures.map(l => {
-          return `
-            <div class="touch-card p-3 flex items-center justify-between gap-3 ${l.is_completed ? 'bg-emerald-50/50' : 'bg-white'}">
-              <!-- Lecture Checkbox + Number ONLY -->
-              <div class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer" onclick="toggleLectureCompletion('${l.client_id}')">
-                <div class="touch-checkbox ${l.is_completed ? 'checked' : ''}">
-                  ${l.is_completed ? '✓' : ''}
-                </div>
+        ${displayLectures.map(l => `
+          <div class="touch-card p-3 flex items-center justify-between gap-3 ${l.is_completed ? 'bg-emerald-50/50 border-emerald-200' : 'bg-white'}">
+            <!-- Lecture Checkbox + Number ONLY (clean, no repeated chapter title) -->
+            <div class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer" onclick="toggleLectureCompletion('${l.client_id}')">
+              <div class="touch-checkbox ${l.is_completed ? 'checked' : ''}">
+                ${l.is_completed ? '✓' : ''}
+              </div>
+              <div class="min-w-0">
                 <span class="text-sm font-bold ${l.is_completed ? 'line-through text-slate-400' : 'text-slate-800'}">
                   Lecture ${l.lecture_no}
                 </span>
-              </div>
-
-              <!-- DPP Checkbox Beside Each Lecture -->
-              <div class="flex items-center gap-2 flex-shrink-0 cursor-pointer" onclick="toggleDppCompletion('${l.client_id}')">
-                <span class="text-xs text-slate-500 font-bold">DPP</span>
-                <div class="touch-checkbox ${l.is_dpp_completed ? 'checked' : ''}">
-                  ${l.is_dpp_completed ? '✓' : ''}
-                </div>
+                ${l.topic && l.topic !== `Lecture ${l.lecture_no}` ? `
+                  <div class="text-[11px] text-slate-400 truncate">${l.topic}</div>
+                ` : ''}
               </div>
             </div>
-          `;
-        }).join('')}
+
+            <!-- DPP Checkbox Beside Each Lecture -->
+            <div class="flex items-center gap-2 flex-shrink-0 cursor-pointer" onclick="toggleDppCompletion('${l.client_id}')">
+              <span class="text-xs text-slate-500 font-bold">DPP</span>
+              <div class="touch-checkbox ${l.is_dpp_completed ? 'checked' : ''}">
+                ${l.is_dpp_completed ? '✓' : ''}
+              </div>
+            </div>
+          </div>
+        `).join('')}
       </div>
     `;
   }
@@ -2065,6 +2380,7 @@ async function renderAnalyticsView() {
   const subjects = await dbGetAll('subjects');
   const lectures = await dbGetAll('lectures');
   const weeklyTargets = await dbGetAll('weekly_targets');
+  const studySessions = await dbGetAll('study_sessions');
 
   const activeLectures = lectures.filter(l => !l.deleted_at);
   const completedLecs = activeLectures.filter(l => l.is_completed).length;
@@ -2176,8 +2492,16 @@ async function renderAnalyticsView() {
   const jeeCanvas = document.getElementById('chart-subject-distribution');
   if (jeeCanvas && window.Chart) {
     if (chartJeeInstance) chartJeeInstance.destroy();
+
+    const pcCompletedHours = (studySessions || []).filter(s => 
+      !s.deleted_at && (s.subject && (s.subject.includes('Physical') || s.subject === 'Physical Chemistry'))
+    ).length;
+
     const labels = subjects.map(s => s.display_name || s.name);
-    const data = subjects.map(s => activeLectures.filter(l => l.subject_client_id === s.client_id && l.is_completed).length);
+    const data = subjects.map(s => {
+      if (s.target_type === 'hours') return pcCompletedHours;
+      return activeLectures.filter(l => l.subject_client_id === s.client_id && l.is_completed).length;
+    });
     const colors = subjects.map(s => s.color || '#4f46e5');
 
     chartJeeInstance = new Chart(jeeCanvas, {

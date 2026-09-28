@@ -1482,7 +1482,7 @@ async function renderSubjectHub(subjectId, container) {
                     <div class="flex items-start justify-between gap-2 mb-2.5">
                       <div class="min-w-0">
                         <div class="flex items-center gap-2 mb-1">
-                          <span class="text-[10px] font-black px-2 py-0.5 rounded bg-slate-100 text-slate-600 uppercase tracking-wide flex-shrink-0">CH ${ch.sequence_no || '—'}</span>
+                          <span class="text-[10px] font-black px-2 py-0.5 rounded bg-slate-100 text-slate-600 uppercase tracking-wide flex-shrink-0">CH ${ch.sequence_no || ''}</span>
                         </div>
                         <h3 class="font-extrabold text-sm text-slate-900 break-words leading-snug">${escapeHtml(ch.name)}</h3>
                       </div>
@@ -1607,7 +1607,7 @@ async function renderChapterView(subjectId, chapterId, container) {
 
   // If Physical Chemistry (hours-based subject), render Hours Checklist
   if (s.target_type === 'hours') {
-    const hoursData = await callApi('get_chapter_hours', { chapter_id: chapterId });
+    const hoursData = await callApi('get_chapter_hours', chapterId);
     const targetHrs = hoursData.target_hours || ch.target_hours || 0;
     const completedList = hoursData.completed_hours || [];
     const completedCount = completedList.length;
@@ -1622,7 +1622,8 @@ async function renderChapterView(subjectId, chapterId, container) {
               <i data-lucide="arrow-left" class="w-4 h-4"></i>
               <span>Back to ${escapeHtml(s.display_name)}</span>
             </button>
-            <h1 class="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2 flex-wrap">
+            <h1 class="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2.5 flex-wrap">
+              <span class="text-xs font-black px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 uppercase tracking-wider">CH ${ch.sequence_no || ''}</span>
               <span>${escapeHtml(ch.name)}</span>
             </h1>
             <div class="text-xs font-semibold text-slate-600 mt-1 flex items-center gap-2 flex-wrap">
@@ -1713,7 +1714,8 @@ async function renderChapterView(subjectId, chapterId, container) {
             <i data-lucide="arrow-left" class="w-4 h-4"></i>
             <span>Back to ${escapeHtml(s.display_name)}</span>
           </button>
-          <h1 class="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2 flex-wrap">
+          <h1 class="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2.5 flex-wrap">
+            <span class="text-xs font-black px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 uppercase tracking-wider">CH ${ch.sequence_no || ''}</span>
             <span>${escapeHtml(ch.name)}</span>
           </h1>
           <div class="text-xs font-semibold text-slate-600 mt-1 flex items-center gap-2 flex-wrap">
@@ -1910,7 +1912,7 @@ async function renderChapterView(subjectId, chapterId, container) {
 
 async function handleChapterHourToggle(chapterId, hourNo) {
   try {
-    const res = await callApi('toggle_chapter_hour', { chapter_id: chapterId, hour_no: hourNo });
+    const res = await callApi('toggle_chapter_hour', chapterId, hourNo);
     if (res && res.success) {
       renderChapterView(state.selectedSubjectId, chapterId, document.getElementById('view-content'));
     }
