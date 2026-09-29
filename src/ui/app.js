@@ -80,6 +80,32 @@ function formatDateNice(dateStr) {
   return dateStr;
 }
 
+function formatActivityTime(isoStr) {
+  if (!isoStr) return '';
+  try {
+    const dt = new Date(isoStr);
+    if (isNaN(dt.getTime())) return isoStr;
+    const now = new Date();
+    const diffMs = now - dt;
+    const diffSecs = Math.floor(diffMs / 1000);
+    const diffMins = Math.floor(diffSecs / 60);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffSecs < 60) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24 && dt.getDate() === now.getDate()) {
+      return `Today, ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+    if (diffDays === 1 || (diffHours < 48 && dt.getDate() === now.getDate() - 1)) {
+      return `Yesterday, ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+    return dt.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return isoStr;
+  }
+}
+
 function getSubjectAccentInfo(subjName) {
   if (subjName === 'Physics') {
     return {
@@ -924,6 +950,73 @@ async function renderDashboard(container) {
           </div>
         `}
       </div>
+
+      <!-- 8. RECENT STUDY ACTIVITY (Real-time Learning Ledger) -->
+      <div class="modern-card p-5 bg-white border border-slate-200 shadow-xs rounded-2xl min-w-0">
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
+          <div>
+            <h3 class="text-base font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+              <i data-lucide="history" class="w-5 h-5 text-indigo-600"></i> Recent Study Activity
+            </h3>
+            <span class="text-xs text-slate-500 font-medium">Verified syllabus & weekly target completions, DPPs, revisions, and test records</span>
+          </div>
+          <span class="text-xs font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100 font-mono">
+            ${(dash.recent_study_activity || []).length} Records
+          </span>
+        </div>
+
+        ${dash.recent_study_activity && dash.recent_study_activity.length > 0 ? `
+          <div class="space-y-2 max-h-80 overflow-y-auto pr-1">
+            ${dash.recent_study_activity.map(act => {
+              let badgeBg = 'bg-blue-50 text-blue-700 border-blue-200';
+              let iconColor = 'text-blue-600';
+              if (act.type === 'target_lecture') {
+                badgeBg = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                iconColor = 'text-emerald-600';
+              } else if (act.type === 'dpp') {
+                badgeBg = 'bg-amber-50 text-amber-800 border-amber-200';
+                iconColor = 'text-amber-600';
+              } else if (act.type === 'revision') {
+                badgeBg = 'bg-purple-50 text-purple-800 border-purple-200';
+                iconColor = 'text-purple-600';
+              } else if (act.type === 'test') {
+                badgeBg = 'bg-rose-50 text-rose-800 border-rose-200';
+                iconColor = 'text-rose-600';
+              }
+
+              return `
+                <div class="p-3 rounded-xl border border-slate-100 bg-slate-50/60 hover:bg-slate-100/70 transition flex items-center justify-between gap-3 text-xs">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-8 h-8 rounded-lg bg-white border border-slate-200 shadow-xs flex items-center justify-center flex-shrink-0">
+                      <i data-lucide="${act.icon || 'book-open'}" class="w-4 h-4 ${iconColor}"></i>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2 mb-0.5">
+                        <span class="font-bold text-slate-900 truncate">${escapeHtml(act.title)}</span>
+                        <span class="text-[10px] px-2 py-0.2 rounded-full border font-bold ${badgeBg} flex-shrink-0">
+                          ${escapeHtml(act.type_label)}
+                        </span>
+                      </div>
+                      <div class="text-[11px] text-slate-500 truncate">
+                        ${escapeHtml(act.subtitle || '')}
+                      </div>
+                    </div>
+                  </div>
+                  <div class="text-right flex-shrink-0 text-[11px] text-slate-400 font-medium">
+                    ${formatActivityTime(act.timestamp)}
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        ` : `
+          <div class="py-8 text-center text-slate-500 text-xs bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+            <i data-lucide="clock" class="w-8 h-8 mx-auto text-slate-300 mb-2"></i>
+            <div class="font-bold text-slate-700">No study completions logged yet!</div>
+            <div class="text-slate-400 mt-0.5">Complete lectures, DPPs, revisions, or tests to populate your activity log.</div>
+          </div>
+        `}
+      </div>
     </div>
   `;
 
@@ -1217,6 +1310,27 @@ async function toggleLectureQuick(id) {
     }
   } catch (err) {
     console.error('toggleLectureQuick error:', err);
+  }
+}
+
+async function toggleTargetLectureQuick(id, weekStart) {
+  try {
+    const res = await callApi('toggle_target_lecture', id, weekStart);
+    if (res && res.success) {
+      const msg = res.target_completed ? 'Lecture marked as Weekly Target completed!' : 'Weekly Target completion removed';
+      showToast(msg, 'success');
+      await loadInitialData();
+      refreshCurrentView();
+      const modal = document.getElementById('modal-weekly-targets');
+      if (modal && !modal.classList.contains('hidden') && currentTargetsModalWeekStart) {
+        await loadAndRenderWeeklyTargetsModal(currentTargetsModalWeekStart);
+      }
+    } else {
+      showToast((res && res.error) || 'Failed to update target completion', 'error');
+    }
+  } catch (err) {
+    console.error('toggleTargetLectureQuick error:', err);
+    showToast('Error updating target completion', 'error');
   }
 }
 
@@ -3179,6 +3293,72 @@ async function renderAnalytics(container) {
         }).join('')}
       </div>
 
+      <!-- Target Lectures List for Current Week -->
+      <div class="modern-card p-5 bg-white border border-slate-200 shadow-xs rounded-2xl">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-2 border-b border-slate-100">
+          <div>
+            <h3 class="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+              <i data-lucide="list-checks" class="w-4 h-4 text-emerald-600"></i> Target Lectures for Week: ${wt.week_start || ''} &rarr; ${wt.week_end || ''}
+            </h3>
+            <span class="text-xs text-slate-500 font-medium">Complete lectures here to credit this week's quota (+1). Syllabus completion is separate.</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+              ${wt.completed_target_lectures || 0} / ${wt.total_target_lectures || 0} Target Completed
+            </span>
+          </div>
+        </div>
+
+        ${(wt.target_lectures && wt.target_lectures.length > 0) ? `
+          <div class="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+            ${wt.target_lectures.map(l => {
+              const isSylDone = Boolean(l.is_completed);
+              const isTgtDone = Boolean(l.target_completed);
+              return `
+                <div class="p-3.5 rounded-xl border ${isTgtDone ? 'bg-emerald-50/50 border-emerald-200' : (isSylDone ? 'bg-blue-50/40 border-blue-200' : 'bg-slate-50 border-slate-200')} flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition hover:bg-slate-100/60">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background-color: ${l.subject_color || '#3b82f6'};"></span>
+                      <span class="font-extrabold text-slate-900 text-xs">${escapeHtml(l.subject_display_name || l.subject_name || '')}</span>
+                      <span class="text-slate-400">•</span>
+                      <span class="text-slate-500 text-[11px] font-mono">${l.scheduled_date || ''}</span>
+                    </div>
+                    <div class="font-bold text-slate-800 break-words ${isTgtDone ? 'line-through text-slate-400' : ''}">
+                      Lecture #${l.lecture_no}: ${escapeHtml(l.topic || l.lecture_name || '')}
+                    </div>
+                    <div class="text-[11px] text-slate-500 truncate mt-0.5">
+                      ${escapeHtml(l.chapter_name || '')}
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-2 flex-shrink-0 self-end sm:self-center">
+                    <!-- Dual Status Badges -->
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${isSylDone ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-slate-100 text-slate-600 border border-slate-200'}">
+                      ${isSylDone ? '✓ Syllabus: Done' : '⏳ Syllabus: Pending'}
+                    </span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${isTgtDone ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-amber-100 text-amber-800 border border-amber-200'}">
+                      ${isTgtDone ? '✓ Target: Done' : '⏳ Target: Pending'}
+                    </span>
+
+                    <!-- Complete Target Action -->
+                    <button onclick="toggleTargetLectureQuick(${l.id}, '${wt.week_start || ''}')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${isTgtDone ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'}">
+                      <i data-lucide="${isTgtDone ? 'check-circle-2' : 'target'}" class="w-3.5 h-3.5"></i>
+                      ${isTgtDone ? '✓ TARGET COMPLETED' : 'COMPLETE TARGET'}
+                    </button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        ` : `
+          <div class="py-8 text-center text-slate-500 text-xs bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+            <i data-lucide="calendar" class="w-8 h-8 mx-auto text-slate-300 mb-2"></i>
+            <div class="font-bold text-slate-700">No scheduled target lectures found for this week!</div>
+            <div class="text-slate-400 mt-0.5">Lectures scheduled within this week automatically populate this target quota.</div>
+          </div>
+        `}
+      </div>
+
       <!-- Mon-Sun Daily Execution Breakdown Table -->
       <div class="modern-card overflow-hidden bg-white border border-slate-200 shadow-xs rounded-2xl">
         <div class="p-4 border-b border-slate-100 flex items-center justify-between">
@@ -3617,7 +3797,7 @@ async function renderPomodoro(container) {
         <div class="flex items-center gap-2 flex-wrap">
           <span class="text-[11px] text-slate-400 font-medium hidden sm:inline">Last sync: ${escapeHtml(pomoStatus.last_sync || 'Never')}</span>
           <button onclick="syncPomodoroNow()" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-sm flex items-center gap-1.5 transition active:scale-95">
-            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Sync Now
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Sync Pomodoro
           </button>
           <button onclick="handleDisablePomodoroIntegration()" class="px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition" title="Disable Integration">
             <i data-lucide="pause-circle" class="w-4 h-4"></i>
@@ -3740,7 +3920,7 @@ async function renderPomodoro(container) {
           Last sync: ${escapeHtml(pomoStatus.last_sync || 'never')}.
         </p>
         <button onclick="syncPomodoroNow()" class="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-sm transition inline-flex items-center gap-2">
-          <i data-lucide="refresh-cw" class="w-4 h-4"></i> Sync Now
+          <i data-lucide="refresh-cw" class="w-4 h-4"></i> Sync Pomodoro
         </button>
       </div>
       ` : `
@@ -3901,7 +4081,7 @@ async function renderPomodoro(container) {
         <div class="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-3">Integration Controls</div>
         <div class="flex flex-wrap gap-3">
           <button onclick="syncPomodoroNow()" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold transition flex items-center gap-1.5 active:scale-95">
-            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Sync Now
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Sync Pomodoro
           </button>
           <button onclick="handleResetPomodoroIntegration()" class="px-4 py-2 rounded-xl bg-white border border-amber-300 text-amber-800 hover:bg-amber-50 font-bold transition flex items-center gap-1.5">
             <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Reset Integration
@@ -3911,7 +4091,7 @@ async function renderPomodoro(container) {
           </button>
         </div>
         <div class="mt-3 text-[10px] text-slate-400 space-y-0.5">
-          <div>• <b>Sync Now</b>: imports new minutes since last check. READ-ONLY. Never modifies Pomodoro app.</div>
+          <div>• <b>Sync Pomodoro</b>: imports new minutes since last check and syncs to Pomodoro cloud. READ-ONLY. Never modifies Pomodoro app.</div>
           <div>• <b>Reset Integration</b>: saves new baseline at current Pomodoro totals. Existing AAYUSH 360 records are kept.</div>
           <div>• <b>Disable Integration</b>: stops automatic syncing. Existing records are kept. Re-enabling creates a fresh baseline.</div>
         </div>
@@ -3967,17 +4147,21 @@ function setPomodoroTimeFilter(filterKey) {
 
 async function syncPomodoroNow() {
   try {
-    showToast('Syncing with Pomodoro app...', 'info');
+    showToast('Syncing Pomodoro sessions...', 'info');
     const res = await callApi('sync_pomodoro_data');
     if (res && res.success) {
-      const msg = res.new_minutes > 0
-        ? `Imported ${res.new_minutes} new minutes!`
-        : (res.message || 'Sync complete — no new activity.');
-      showToast(msg, res.new_minutes > 0 ? 'success' : 'info');
+      if (res.cloud_success === false) {
+        showToast(`Local Pomodoro updated (${res.today_minutes || 0}m today), but Cloud sync failed: ${res.cloud_error || 'Check Supabase table'}`, 'warning');
+      } else {
+        const msg = res.new_minutes > 0
+          ? `Imported ${res.new_minutes} new minutes & synced to Cloud!`
+          : (res.cloud_message || res.message || 'Pomodoro sync complete.');
+        showToast(msg, 'success');
+      }
       await loadInitialData();
       renderPomodoro(document.getElementById('view-content'));
     } else {
-      showToast(res.error || 'Sync failed', 'error');
+      showToast(res.error || res.message || 'Pomodoro sync failed', 'error');
     }
   } catch (e) {
     showToast(`Sync error: ${e.message || e}`, 'error');
@@ -4210,7 +4394,7 @@ async function renderSettings(container) {
             </button>
           ` : `
             <button onclick="syncPomodoroNow()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5">
-              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Sync Now
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Sync Pomodoro
             </button>
             <button onclick="handleResetPomodoroIntegration()" class="px-4 py-2 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-xs border border-amber-300 transition flex items-center gap-1.5">
               <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Reset Baseline
@@ -4840,37 +5024,89 @@ async function loadAndRenderWeeklyTargetsModal(weekStart) {
   if (rangeEl) rangeEl.textContent = `Monday ${data.week_start} to Sunday ${data.week_end}`;
 
   const container = document.getElementById('wt-modal-subjects-container');
-  if (!container) return;
-
-  container.innerHTML = (data.targets || []).map(t => {
-    const isHours = t.target_type === 'hours';
-    const step = isHours ? '0.5' : '1';
-    return `
-      <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
-        <div class="flex items-center gap-2.5 min-w-[170px]">
-          <span class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: ${t.color};"></span>
-          <div>
-            <div class="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-              ${t.display_name}
-              ${t.is_custom ? '<span class="text-[9px] px-1 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">Custom</span>' : ''}
+  if (container) {
+    container.innerHTML = (data.targets || []).map(t => {
+      const isHours = t.target_type === 'hours';
+      const step = isHours ? '0.5' : '1';
+      return `
+        <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5 min-w-[170px]">
+            <span class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: ${t.color};"></span>
+            <div>
+              <div class="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                ${t.display_name}
+                ${t.is_custom ? '<span class="text-[9px] px-1 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">Custom</span>' : ''}
+              </div>
+              <div class="text-[10px] text-slate-500">${t.resource_name} (Default: ${t.default_target_value} ${t.target_type})</div>
             </div>
-            <div class="text-[10px] text-slate-500">${t.resource_name} (Default: ${t.default_target_value} ${t.target_type})</div>
+          </div>
+
+          <div class="flex items-center gap-1.5">
+            <button type="button" onclick="adjustTargetInput(${t.subject_id}, ${isHours ? -0.5 : -1})" class="w-7 h-7 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-sm flex items-center justify-center transition">
+              -
+            </button>
+            <input type="number" id="wt-input-subj-${t.subject_id}" data-type="${t.target_type}" value="${t.target_value}" min="0" step="${step}" required class="w-16 bg-white border border-slate-300 rounded p-1 text-center font-bold text-slate-800 text-xs shadow-xs focus:outline-none">
+            <button type="button" onclick="adjustTargetInput(${t.subject_id}, ${isHours ? 0.5 : 1})" class="w-7 h-7 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-sm flex items-center justify-center transition">
+              +
+            </button>
+            <span class="text-[11px] text-slate-500 font-medium min-w-[38px]">${t.target_type}</span>
           </div>
         </div>
+      `;
+    }).join('');
+  }
 
-        <div class="flex items-center gap-1.5">
-          <button type="button" onclick="adjustTargetInput(${t.subject_id}, ${isHours ? -0.5 : -1})" class="w-7 h-7 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-sm flex items-center justify-center transition">
-            -
-          </button>
-          <input type="number" id="wt-input-subj-${t.subject_id}" data-type="${t.target_type}" value="${t.target_value}" min="0" step="${step}" required class="w-16 bg-white border border-slate-300 rounded p-1 text-center font-bold text-slate-800 text-xs shadow-xs focus:outline-none">
-          <button type="button" onclick="adjustTargetInput(${t.subject_id}, ${isHours ? 0.5 : 1})" class="w-7 h-7 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-sm flex items-center justify-center transition">
-            +
-          </button>
-          <span class="text-[11px] text-slate-500 font-medium min-w-[38px]">${t.target_type}</span>
+  // Load and render target lectures list for this week
+  const lecsContainer = document.getElementById('wt-modal-lectures-container');
+  const lecsCounter = document.getElementById('wt-modal-lectures-counter');
+  if (lecsContainer) {
+    const targetLecs = await callApi('get_weekly_target_lectures', data.week_start);
+    const list = Array.isArray(targetLecs) ? targetLecs : ((targetLecs && targetLecs.lectures) || []);
+    const doneCount = list.filter(l => l.target_completed).length;
+    if (lecsCounter) {
+      lecsCounter.textContent = `${doneCount} / ${list.length} Done`;
+    }
+    if (list.length === 0) {
+      lecsContainer.innerHTML = `
+        <div class="py-6 text-center text-slate-400 text-xs bg-slate-50 rounded-xl border border-dashed border-slate-200">
+          No scheduled lectures found for this week.
         </div>
-      </div>
-    `;
-  }).join('');
+      `;
+    } else {
+      lecsContainer.innerHTML = list.map(l => {
+        const isSylDone = Boolean(l.is_completed);
+        const isTgtDone = Boolean(l.target_completed);
+        return `
+          <div class="p-2.5 rounded-xl border ${isTgtDone ? 'bg-emerald-50/50 border-emerald-200' : (isSylDone ? 'bg-blue-50/40 border-blue-200' : 'bg-slate-50 border-slate-200')} flex items-center justify-between gap-2.5 text-xs">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5 text-[11px] mb-0.5">
+                <span class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: ${l.subject_color || '#3b82f6'};"></span>
+                <span class="font-bold text-slate-800">${escapeHtml(l.subject_display_name || l.subject_name || '')}</span>
+                <span class="text-slate-400">•</span>
+                <span class="text-slate-500 font-mono text-[10px]">${l.scheduled_date || ''}</span>
+              </div>
+              <div class="font-bold text-slate-800 truncate ${isTgtDone ? 'line-through text-slate-400' : ''}">
+                Lec #${l.lecture_no}: ${escapeHtml(l.topic || l.lecture_name || '')}
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${isSylDone ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">
+                ${isSylDone ? '✓ Syl' : '⏳ Syl'}
+              </span>
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${isTgtDone ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                ${isTgtDone ? '✓ Tgt' : '⏳ Tgt'}
+              </span>
+              <button type="button" onclick="toggleTargetLectureQuick(${l.id}, '${data.week_start}')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 cursor-pointer ${isTgtDone ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}">
+                <i data-lucide="${isTgtDone ? 'check-circle-2' : 'target'}" class="w-3 h-3"></i>
+                ${isTgtDone ? 'Done' : 'Complete'}
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+      if (window.lucide) lucide.createIcons();
+    }
+  }
 }
 
 function adjustTargetInput(subjId, delta) {

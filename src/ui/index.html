@@ -47,10 +47,16 @@
         <span id="header-test-text">Test 01 in 14 days</span>
       </div>
 
-      <!-- Cloud Sync Status Pill -->
-      <button id="header-cloud-sync-btn" onclick="handleHeaderSyncClick()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 hover:bg-sky-100 text-sky-800 text-xs font-semibold shadow-sm transition" title="Supabase Cloud Sync">
+      <!-- Cloud Sync Status Pill (AAYUSH 360) -->
+      <button id="header-cloud-sync-btn" onclick="handleHeaderSyncClick()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 hover:bg-sky-100 text-sky-800 text-xs font-semibold shadow-sm transition" title="Sync AAYUSH 360 data with Supabase">
         <i data-lucide="cloud" class="w-3.5 h-3.5 text-sky-600"></i>
-        <span id="header-sync-status-text">Cloud Sync</span>
+        <span id="header-sync-status-text">Sync AAYUSH 360</span>
+      </button>
+
+      <!-- Dedicated Pomodoro Sync Button -->
+      <button id="header-pomo-sync-btn" onclick="syncPomodoroNow()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-300 hover:bg-amber-100 text-amber-800 text-xs font-semibold shadow-sm transition" title="Sync Pomodoro with LevelDB and Supabase pomodoro_sessions">
+        <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-amber-600"></i>
+        <span>Sync Pomodoro</span>
       </button>
 
       <!-- Quick Action Buttons -->
@@ -59,8 +65,8 @@
         <span>Add Lecture</span>
       </button>
 
-      <button onclick="navigateTo('pomodoro')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-300 hover:bg-amber-100 text-amber-800 text-xs font-semibold shadow-sm transition">
-        <i data-lucide="clock" class="w-3.5 h-3.5 text-amber-600"></i>
+      <button onclick="navigateTo('pomodoro')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 hover:bg-slate-200 text-slate-800 text-xs font-semibold shadow-sm transition">
+        <i data-lucide="clock" class="w-3.5 h-3.5 text-slate-600"></i>
         <span>Pomodoro</span>
       </button>
 
@@ -656,13 +662,13 @@
 
   <!-- 6. WEEKLY TARGETS MODAL -->
   <div id="modal-weekly-targets" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="modern-card w-full max-w-lg p-6 bg-white border border-indigo-200 shadow-2xl relative rounded-2xl max-h-[90vh] overflow-y-auto">
+    <div class="modern-card w-full max-w-2xl p-6 bg-white border border-indigo-200 shadow-2xl relative rounded-2xl max-h-[90vh] overflow-y-auto">
       <div class="flex justify-between items-center mb-3 pb-3 border-b border-gray-100">
         <div>
           <h3 class="text-base font-black text-gray-900 flex items-center gap-2">
             <i data-lucide="target" class="w-5 h-5 text-indigo-600"></i> Weekly Target Manager
           </h3>
-          <p class="text-[11px] text-gray-500">Customize targets for this specific week. Historical and future weeks remain independently preserved.</p>
+          <p class="text-[11px] text-gray-500">Customize targets and track individual target lecture completions for this specific week.</p>
         </div>
         <button onclick="closeModal('modal-weekly-targets')" class="text-gray-400 hover:text-gray-700 text-lg">&times;</button>
       </div>
@@ -688,15 +694,33 @@
         <div class="p-2.5 bg-indigo-50 border border-indigo-200 rounded-lg text-[11px] text-indigo-900 flex items-start gap-2">
           <i data-lucide="info" class="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5"></i>
           <div>
-            <b>Historical Preservation:</b> Changes made here apply only to the selected week. Previous weeks keep their logged target values for historical analytics accuracy.
+            <b>Target Isolation:</b> Completing a lecture from the normal Syllabus view updates syllabus progress only (+0 to target). Completing a lecture here increments your Weekly Target progress (+1) and updates the syllabus.
           </div>
         </div>
 
         <div class="flex justify-end gap-3 pt-3 border-t border-gray-100">
           <button type="button" onclick="closeModal('modal-weekly-targets')" class="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold border border-gray-200">Cancel</button>
-          <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-sm">Save Weekly Targets</button>
+          <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-sm">Save Target Quotas</button>
         </div>
       </form>
+
+      <!-- Target Lectures Breakdown for this Week -->
+      <div id="wt-modal-lectures-section" class="mt-6 pt-4 border-t border-slate-200">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h4 class="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="list-checks" class="w-4 h-4 text-emerald-600"></i> Assigned Target Lectures
+            </h4>
+            <p class="text-[11px] text-slate-500">Per-lecture completion ledger for this week's quota</p>
+          </div>
+          <span id="wt-modal-lectures-counter" class="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+            0 / 0 Done
+          </span>
+        </div>
+        <div id="wt-modal-lectures-container" class="space-y-2 max-h-60 overflow-y-auto pr-1">
+          <!-- Populated dynamically via JS -->
+        </div>
+      </div>
     </div>
   </div>
 

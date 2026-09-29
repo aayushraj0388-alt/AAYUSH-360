@@ -241,6 +241,46 @@ class AppAPI:
         """Saves independent targets for week_start and validates non-negative values."""
         return self.db.set_weekly_targets(week_start, targets)
 
+    def complete_target_lecture(self, lecture_id: int, week_start: Optional[str] = None) -> Dict[str, Any]:
+        """Marks lecture as completed for the specified weekly target and updates syllabus status."""
+        res = self.db.complete_target_lecture(lecture_id, week_start)
+        if res.get('success'):
+            self._update_streak()
+            if self.cloud_sync and self.cloud_sync.get_status().get('enabled'):
+                threading.Thread(target=self.cloud_sync.sync_now, kwargs={'timeout': 10.0}, daemon=True).start()
+        return res
+
+    def uncomplete_target_lecture(self, lecture_id: int, week_start: Optional[str] = None) -> Dict[str, Any]:
+        """Removes weekly target completion for a lecture while keeping syllabus completion intact."""
+        res = self.db.uncomplete_target_lecture(lecture_id, week_start)
+        if res.get('success') and self.cloud_sync and self.cloud_sync.get_status().get('enabled'):
+            threading.Thread(target=self.cloud_sync.sync_now, kwargs={'timeout': 10.0}, daemon=True).start()
+        return res
+
+    def toggle_target_lecture(self, lecture_id: int, week_start: Optional[str] = None) -> Dict[str, Any]:
+        """Toggles weekly target completion for a lecture."""
+        res = self.db.toggle_target_lecture(lecture_id, week_start)
+        if res.get('success') and res.get('target_completed'):
+            self._update_streak()
+        if res.get('success') and self.cloud_sync and self.cloud_sync.get_status().get('enabled'):
+            threading.Thread(target=self.cloud_sync.sync_now, kwargs={'timeout': 10.0}, daemon=True).start()
+        return res
+
+    def get_weekly_target_lectures(self, week_start: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Returns the list of target lectures for the given week with dual completion status."""
+        return self.db.get_weekly_target_lectures(week_start)
+
+    def add_lecture_to_weekly_target(self, lecture_id: int, week_start: Optional[str] = None) -> Dict[str, Any]:
+        """Assigns an unassigned or backlog lecture to a weekly target."""
+        res = self.db.add_lecture_to_weekly_target(lecture_id, week_start)
+        if res.get('success') and self.cloud_sync and self.cloud_sync.get_status().get('enabled'):
+            threading.Thread(target=self.cloud_sync.sync_now, kwargs={'timeout': 10.0}, daemon=True).start()
+        return res
+
+    def get_recent_study(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Returns recent learning activity records (completed lectures with target tags, DPPs, revisions, tests)."""
+        return self.db.get_recent_study_activity(limit)
+
     # ------------------ CALENDAR DATA (PLANNED VS ACTUAL STUDY) ------------------
 
     def get_calendar_month(self, year: int, month: int) -> Dict[str, Any]:
@@ -436,13 +476,12 @@ class AppAPI:
         return self.cloud_sync.get_status()
 
     def cloud_sync_now(self) -> Dict[str, Any]:
-        """Triggers an immediate bidirectional sync."""
-        if hasattr(self, 'pomodoro_sync') and self.pomodoro_sync:
-            try:
-                self.pomodoro_sync.flush_live_session(force=True)
-            except Exception as e:
-                print(f"[AppAPI] Warning: Failed to flush pomodoro live session before sync: {e}")
+        """Triggers an immediate bidirectional sync of normal AAYUSH 360 data ONLY."""
         return self.cloud_sync.sync_now()
+
+    def sync_pomodoro_now(self) -> Dict[str, Any]:
+        """Triggers dedicated Pomodoro sync (LevelDB -> local pomodoro_sessions -> Supabase pomodoro_sessions)."""
+        return self.pomodoro_sync.sync()
 
     def get_mobile_pairing_payload(self) -> Dict[str, Any]:
         """Generates a secure pairing payload for linking the Android mobile app."""
@@ -456,13 +495,19 @@ class AppAPI:
         if not uid or not email:
             return {'success': False, 'error': 'Windows app is not logged into Cloud Sync yet.'}
             
-        payload = json.dumps({
-            "access_token": token,
-            "refresh_token": rtoken,
+        pairing_dict = {
             "user_id": uid,
-            "email": email,
-            "password": password
-        })
+            "email": email
+        }
+        if password:
+            pairing_dict["password"] = password
+        elif token and rtoken:
+            pairing_dict["access_token"] = token
+            pairing_dict["refresh_token"] = rtoken
+        else:
+            return {'success': False, 'error': 'No valid login credentials or tokens found for pairing.'}
+
+        payload = json.dumps(pairing_dict)
         encoded = base64.b64encode(payload.encode('utf-8')).decode('utf-8')
         return {
             'success': True,

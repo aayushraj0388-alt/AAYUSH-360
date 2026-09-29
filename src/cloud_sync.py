@@ -267,10 +267,7 @@ class CloudSyncEngine:
                 self._set_setting(KEY_CLOUD_SYNC_STATUS, f"Sync error: {error_msg}")
                 return {"success": False, "error": error_msg}
 
-            # 0. Flush any live/uncommitted Pomodoro minutes into SQLite study_sessions before pushing
-            self.flush_pomodoro()
-
-            # 1. PUSH LOCAL PENDING CHANGES
+            # 1. PUSH LOCAL PENDING CHANGES (AAYUSH 360 data ONLY)
             try:
                 print("[CloudSync] --- STAGE 1: UPLOADING LOCAL CHANGES ---")
                 pushed_count = self._push_local_changes(user_id)
@@ -466,15 +463,15 @@ class CloudSyncEngine:
                 conn.execute(f"UPDATE weekly_targets SET sync_status = 'synced' WHERE client_id IN ({placeholders})", pushed_cids)
                 total_pushed += len(payload)
 
-            # 6. STUDY SESSIONS (Pomodoro Study Time & Manual Sessions)
-            cur = conn.execute("SELECT * FROM study_sessions WHERE sync_status = 'pending'")
+            # 6. STUDY SESSIONS (Manual Study Logs & Physical Chemistry ONLY - Pomodoro is separate)
+            cur = conn.execute("SELECT * FROM study_sessions WHERE sync_status = 'pending' AND (source IS NULL OR source != 'Pomodoro')")
             rows = [dict(r) for r in cur.fetchall()]
             if rows:
                 pushed_cids = [r["client_id"] for r in rows]
                 payload = [{
                     "user_id": user_id,
                     "client_id": r["client_id"],
-                    "source": r.get("source", "Pomodoro"),
+                    "source": r.get("source", "Manual"),
                     "external_session_id": r.get("external_session_id"),
                     "date": r["date"],
                     "start_time": r.get("start_time"),

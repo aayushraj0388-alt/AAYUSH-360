@@ -277,11 +277,106 @@ class PomodoroSyncEngine:
     # Core Data Migration & Sync Engine
     # -----------------------------------------------------------------------
 
+    def sync_cloud(self) -> Dict[str, Any]:
+        """
+        Dedicated cloud synchronization for Pomodoro sessions.
+        Communicates EXCLUSIVELY with the dedicated Supabase `pomodoro_sessions` table.
+        Does NOT touch lectures, syllabus, weekly targets, tests, or study_sessions.
+        Bidirectional: pushes pending local pomodoro_sessions, pulls remote pomodoro_sessions.
+        """
+        settings = self._get_settings()
+        user_id = settings.get('cloud_user_id', '')
+        if not user_id:
+            return {'success': False, 'error': 'Supabase cloud account not connected. Please log in via Cloud Sync first.'}
+
+        try:
+            from src.config import get_supabase_config
+            from supabase import create_client
+            cfg = get_supabase_config()
+            client = create_client(cfg['url'], cfg['key'])
+            
+            # Restore auth session
+            access_token = settings.get('cloud_access_token', '')
+            refresh_token = settings.get('cloud_refresh_token', '')
+            session_valid = False
+            if access_token and refresh_token:
+                try:
+                    res = client.auth.set_session(access_token, refresh_token)
+                    if res and res.session:
+                        session_valid = True
+                except Exception:
+                    pass
+
+            if not session_valid:
+                email = settings.get('cloud_user_email', '')
+                pwd = settings.get('cloud_user_password', '')
+                if email and pwd:
+                    try:
+                        res = client.auth.sign_in_with_password({"email": email, "password": pwd})
+                        if res and res.session:
+                            session_valid = True
+                    except Exception as auth_err:
+                        return {'success': False, 'error': f"Authentication failed: {auth_err}"}
+
+            conn = self.db.get_connection()
+            c = conn.cursor()
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+            # 1. PUSH local pending pomodoro_sessions
+            pending = c.execute("SELECT * FROM pomodoro_sessions WHERE sync_status = 'pending'").fetchall()
+            pushed_count = 0
+            if pending:
+                payload = [{
+                    "user_id": user_id,
+                    "client_id": r["client_id"],
+                    "date": r["date"],
+                    "start_time": r.get("start_time") or "",
+                    "end_time": r.get("end_time") or "",
+                    "duration_minutes": float(r["duration_minutes"] or 0),
+                    "duration_hours": float(r["duration_hours"] or 0),
+                    "focus_count": int(r.get("focus_count") or 1),
+                    "topic": r.get("topic") or "",
+                    "notes": r.get("notes") or "",
+                    "updated_at": now_iso,
+                    "deleted_at": r.get("deleted_at")
+                } for r in pending]
+                client.table("pomodoro_sessions").upsert(payload, on_conflict="user_id,client_id").execute()
+                pushed_cids = [r["client_id"] for r in pending]
+                placeholders = ','.join('?' * len(pushed_cids))
+                c.execute(f"UPDATE pomodoro_sessions SET sync_status = 'synced' WHERE client_id IN ({placeholders})", pushed_cids)
+                conn.commit()
+                pushed_count = len(payload)
+
+            # 2. PULL remote pomodoro_sessions
+            res = client.table("pomodoro_sessions").select("*").eq("user_id", user_id).execute()
+            pulled_count = 0
+            if res.data:
+                stats = self.db.merge_cloud_pomodoro_sessions(res.data)
+                pulled_count = stats.get('inserted', 0) + stats.get('updated', 0)
+
+            conn.close()
+            now_local = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            self._set_settings({
+                KEY_LAST_SYNC: now_local,
+                'pomodoro_last_sync': now_local
+            })
+            return {
+                'success': True,
+                'pushed': pushed_count,
+                'pulled': pulled_count,
+                'message': f"Pomodoro cloud sync complete (Pushed: {pushed_count}, Pulled: {pulled_count})"
+            }
+
+        except Exception as e:
+            err_msg = str(e)
+            print(f"[PomodoroSync] Dedicated cloud sync error: {err_msg}")
+            return {'success': False, 'error': err_msg}
+
     def sync_from_source(self, start_date: str = "2026-09-28", push_cloud: bool = True) -> Dict[str, Any]:
         """
-        Reads real Pomodoro stats from LevelDB and synchronizes canonical daily records.
+        Reads real Pomodoro stats from LevelDB and synchronizes canonical daily records into pomodoro_sessions table.
         Idempotent: running multiple times never creates duplicates.
-        Eliminates double counting by soft-deleting old fragmented records.
+        Strict isolation: never writes to study_sessions table.
         """
         with self._lock:
             stats = read_pomodoro_stats(self._leveldb_dir)
@@ -301,77 +396,71 @@ class PomodoroSyncEngine:
             conn = self.db.get_connection()
             c = conn.cursor()
 
-            # Find existing study_sessions for dates >= start_date
+            # Find existing pomodoro_sessions for dates >= start_date
             existing_rows = c.execute("""
-                SELECT id, client_id, source, external_session_id, date, duration_minutes, duration_hours, notes, deleted_at, sync_status
-                FROM study_sessions
+                SELECT id, client_id, date, duration_minutes, duration_hours, notes, deleted_at, sync_status
+                FROM pomodoro_sessions
                 WHERE date >= ?;
             """, (start_date,)).fetchall()
 
             migrated_count = 0
             soft_deleted_cids = []
 
-            # 1. Upsert canonical daily records
+            # 1. Upsert canonical daily records into pomodoro_sessions
             for d, info in sorted(target_dates.items()):
                 mins = float(info.get("minutes", 0))
                 fc = int(info.get("focusCount", 0))
                 hrs = round(mins / 60.0, 2)
                 cid = f"pomo_day_{d}"
-                ext_id = f"pomo_daily_{d}"
                 notes = f"Pomodoro study ({int(mins)} min, {fc} focus session{'s' if fc != 1 else ''})"
                 topic = f"Focus Sessions: {fc}"
 
-                existing_can = c.execute("SELECT id, duration_minutes, deleted_at, sync_status FROM study_sessions WHERE client_id = ?", (cid,)).fetchone()
+                existing_can = c.execute("SELECT id, duration_minutes, deleted_at, sync_status FROM pomodoro_sessions WHERE client_id = ?", (cid,)).fetchone()
                 if existing_can:
                     # Update if minutes or status changed
                     if existing_can['duration_minutes'] != mins or existing_can['deleted_at'] is not None:
                         c.execute("""
-                            UPDATE study_sessions SET
-                                source = 'Pomodoro',
-                                external_session_id = ?,
+                            UPDATE pomodoro_sessions SET
                                 date = ?,
                                 duration_minutes = ?,
                                 duration_hours = ?,
-                                subject = 'Pomodoro Study Time',
+                                focus_count = ?,
                                 topic = ?,
                                 notes = ?,
                                 deleted_at = NULL,
                                 sync_status = 'pending',
                                 updated_at = ?
                             WHERE client_id = ?;
-                        """, (ext_id, d, mins, hrs, topic, notes, now_local, cid))
+                        """, (d, mins, hrs, fc, topic, notes, now_local, cid))
                         migrated_count += 1
                 else:
                     c.execute("""
-                        INSERT INTO study_sessions (
-                            client_id, source, external_session_id, date, start_time, end_time,
-                            duration_minutes, duration_hours, subject, chapter, topic, activity, notes,
+                        INSERT INTO pomodoro_sessions (
+                            client_id, date, start_time, end_time,
+                            duration_minutes, duration_hours, focus_count, topic, notes,
                             sync_status, created_at, updated_at
-                        ) VALUES (?, 'Pomodoro', ?, ?, '', '', ?, ?, 'Pomodoro Study Time', '', ?, 'Other', ?, 'pending', ?, ?);
-                    """, (cid, ext_id, d, mins, hrs, topic, notes, now_local, now_local))
+                        ) VALUES (?, ?, '', '', ?, ?, ?, ?, ?, 'pending', ?, ?);
+                    """, (cid, d, mins, hrs, fc, topic, notes, now_local, now_local))
                     migrated_count += 1
 
-            # 2. Soft-delete old fragmented records to eliminate double-counting
+            # 2. Soft-delete old fragmented records in pomodoro_sessions
             canonical_cids = {f"pomo_day_{d}" for d in target_dates}
             for s in existing_rows:
                 cid = s["client_id"]
-                ext_id = s["external_session_id"] or ""
                 if cid in canonical_cids:
                     continue
-                # Preserve genuine manual sessions from Android
-                if ext_id.startswith("manual_"):
-                    continue
-                # Soft-delete fragmented chunks or old test records
-                if s["source"] == "Pomodoro" or ext_id.startswith("pomo_session_") or cid.startswith("test_") or ext_id.startswith("ext_test_"):
-                    if not s["deleted_at"]:
-                        c.execute("""
-                            UPDATE study_sessions SET
-                                deleted_at = ?,
-                                sync_status = 'pending',
-                                updated_at = ?
-                            WHERE client_id = ?;
-                        """, (now_iso, now_local, cid))
-                        soft_deleted_cids.append(cid)
+                if not s["deleted_at"]:
+                    c.execute("""
+                        UPDATE pomodoro_sessions SET
+                            deleted_at = ?,
+                            sync_status = 'pending',
+                            updated_at = ?
+                        WHERE client_id = ?;
+                    """, (now_iso, now_local, cid))
+                    soft_deleted_cids.append(cid)
+
+            # Strict isolation: ensure study_sessions NEVER has any Pomodoro records
+            c.execute("DELETE FROM study_sessions WHERE source = 'Pomodoro';")
 
             conn.commit()
             conn.close()
@@ -411,12 +500,17 @@ class PomodoroSyncEngine:
                 'message': f"Synchronized Pomodoro data from {start_date} onwards. Today: {today_mins} min."
             }
 
-        # 4. Trigger Cloud Sync outside lock if available
-        if push_cloud and self.cloud_sync:
-            try:
-                self.cloud_sync.sync_now()
-            except Exception as sync_err:
-                print(f"[PomodoroSync] Cloud sync trigger warning: {sync_err}")
+        # 4. Trigger Dedicated Pomodoro Cloud Sync outside lock if requested
+        if push_cloud:
+            cloud_res = self.sync_cloud()
+            if not cloud_res.get('success'):
+                # Surface real error if cloud sync failed
+                result_payload['cloud_success'] = False
+                result_payload['cloud_error'] = cloud_res.get('error')
+                result_payload['message'] += f" Cloud sync error: {cloud_res.get('error')}"
+            else:
+                result_payload['cloud_success'] = True
+                result_payload['cloud_message'] = cloud_res.get('message')
 
         if self.on_session_committed and callable(self.on_session_committed):
             try:
@@ -489,8 +583,8 @@ class PomodoroSyncEngine:
         try:
             conn = self.db.get_connection()
             row = conn.execute("""
-                SELECT duration_minutes FROM study_sessions
-                WHERE date = ? AND (deleted_at IS NULL OR deleted_at = '') AND source = 'Pomodoro'
+                SELECT duration_minutes FROM pomodoro_sessions
+                WHERE date = ? AND (deleted_at IS NULL OR deleted_at = '')
                 ORDER BY id DESC LIMIT 1;
             """, (today_str,)).fetchone()
             if row:
@@ -523,21 +617,25 @@ class PomodoroSyncEngine:
         end_of_week = (today_dt + datetime.timedelta(days=6 - today_dt.weekday())).isoformat()
         start_of_month = f"{today_dt.year:04d}-{today_dt.month:02d}-01"
 
-        base_filter = "AND (deleted_at IS NULL OR deleted_at = '') AND source = 'Pomodoro'"
+        base_filter = "AND (deleted_at IS NULL OR deleted_at = '')"
 
         try:
             conn = self.db.get_connection()
             c = conn.cursor()
 
-            today_mins = c.execute(f"SELECT SUM(duration_minutes) FROM study_sessions WHERE date = ? {base_filter};", (today_str,)).fetchone()[0] or 0.0
-            week_mins = c.execute(f"SELECT SUM(duration_minutes) FROM study_sessions WHERE date >= ? AND date <= ? {base_filter};", (start_of_week, end_of_week)).fetchone()[0] or 0.0
-            month_mins = c.execute(f"SELECT SUM(duration_minutes) FROM study_sessions WHERE date >= ? {base_filter};", (start_of_month,)).fetchone()[0] or 0.0
-            total_mins = c.execute(f"SELECT SUM(duration_minutes) FROM study_sessions WHERE 1=1 {base_filter};").fetchone()[0] or 0.0
+            today_mins = c.execute(f"SELECT SUM(duration_minutes) FROM pomodoro_sessions WHERE date = ? {base_filter};", (today_str,)).fetchone()[0] or 0.0
+            week_mins = c.execute(f"SELECT SUM(duration_minutes) FROM pomodoro_sessions WHERE date >= ? AND date <= ? {base_filter};", (start_of_week, end_of_week)).fetchone()[0] or 0.0
+            month_mins = c.execute(f"SELECT SUM(duration_minutes) FROM pomodoro_sessions WHERE date >= ? {base_filter};", (start_of_month,)).fetchone()[0] or 0.0
+            total_mins = c.execute(f"SELECT SUM(duration_minutes) FROM pomodoro_sessions WHERE 1=1 {base_filter};").fetchone()[0] or 0.0
 
             # Count total focus sessions
-            rows = c.execute(f"SELECT topic, notes FROM study_sessions WHERE 1=1 {base_filter};").fetchall()
+            rows = c.execute(f"SELECT focus_count, topic, notes FROM pomodoro_sessions WHERE 1=1 {base_filter};").fetchall()
             total_focus_count = 0
             for r in rows:
+                fc = r['focus_count'] if 'focus_count' in r.keys() and r['focus_count'] else None
+                if fc:
+                    total_focus_count += int(fc)
+                    continue
                 topic = r['topic'] or ''
                 if topic.startswith('Focus Sessions:'):
                     try:

@@ -97,6 +97,32 @@ function getWeekDateRange(dateStr = null) {
   };
 }
 
+function formatActivityTime(isoStr) {
+  if (!isoStr) return '';
+  try {
+    const dt = new Date(isoStr);
+    if (isNaN(dt.getTime())) return isoStr;
+    const now = new Date();
+    const diffMs = now - dt;
+    const diffSecs = Math.floor(diffMs / 1000);
+    const diffMins = Math.floor(diffSecs / 60);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffSecs < 60) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24 && dt.getDate() === now.getDate()) {
+      return `Today, ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+    if (diffDays === 1 || (diffHours < 48 && dt.getDate() === now.getDate() - 1)) {
+      return `Yesterday, ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+    return dt.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return isoStr;
+  }
+}
+
 function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');
   if (!container) return;
@@ -120,7 +146,7 @@ function showToast(message, type = 'info') {
 // ============================================================================
 
 const DB_NAME = 'Aayush360_Mobile_DB';
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 
 function initIndexedDB() {
   return new Promise((resolve, reject) => {
@@ -170,7 +196,7 @@ function initIndexedDB() {
         store.createIndex('sync_status', 'sync_status', { unique: false });
       }
 
-      // 6. Study Sessions (Pomodoro)
+      // 6. Study Sessions (Manual & PChem - Strictly non-Pomodoro)
       if (!idb.objectStoreNames.contains('study_sessions')) {
         const store = idb.createObjectStore('study_sessions', { keyPath: 'client_id' });
         store.createIndex('date', 'date', { unique: false });
@@ -188,10 +214,45 @@ function initIndexedDB() {
       if (!idb.objectStoreNames.contains('app_settings')) {
         idb.createObjectStore('app_settings', { keyPath: 'key' });
       }
+
+      // 9. Weekly Target Completions
+      if (!idb.objectStoreNames.contains('weekly_target_completions')) {
+        const store = idb.createObjectStore('weekly_target_completions', { keyPath: 'client_id' });
+        store.createIndex('week_start', 'week_start', { unique: false });
+        store.createIndex('lecture_client_id', 'lecture_client_id', { unique: false });
+        store.createIndex('sync_status', 'sync_status', { unique: false });
+      }
+
+      // 10. Dedicated Pomodoro Sessions Store
+      if (!idb.objectStoreNames.contains('pomodoro_sessions')) {
+        const store = idb.createObjectStore('pomodoro_sessions', { keyPath: 'client_id' });
+        store.createIndex('date', 'date', { unique: false });
+        store.createIndex('sync_status', 'sync_status', { unique: false });
+      }
     };
 
-    request.onsuccess = (e) => {
+    request.onsuccess = async (e) => {
       db = e.target.result;
+      // Auto-migrate any existing Pomodoro rows out of study_sessions into pomodoro_sessions
+      try {
+        if (db.objectStoreNames.contains('study_sessions') && db.objectStoreNames.contains('pomodoro_sessions')) {
+          const tx = db.transaction(['study_sessions', 'pomodoro_sessions'], 'readwrite');
+          const sStore = tx.objectStore('study_sessions');
+          const pStore = tx.objectStore('pomodoro_sessions');
+          const getReq = sStore.getAll();
+          getReq.onsuccess = () => {
+            const items = getReq.result || [];
+            items.forEach(it => {
+              if (it.source === 'Pomodoro' || it.client_id?.startsWith('pomo_')) {
+                pStore.put({ ...it, source: 'Pomodoro' });
+                sStore.delete(it.client_id);
+              }
+            });
+          };
+        }
+      } catch (migErr) {
+        console.warn('[IndexedDB] Pomodoro store migration notice:', migErr);
+      }
       resolve(db);
     };
 
@@ -551,6 +612,16 @@ function updateAuthUI(email) {
     if (manageBtn) manageBtn.textContent = 'Link Account';
     if (cloudBanner) cloudBanner.classList.remove('hidden');
   }
+
+  getSetting('pomo_cloud_last_sync_time', '').then(lastPomo => {
+    const pomoTimeElem = document.getElementById('pomo-sync-last-time');
+    if (pomoTimeElem && lastPomo) {
+      try {
+        const d = new Date(lastPomo);
+        pomoTimeElem.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } catch (_) {}
+    }
+  });
 }
 
 async function handleHeaderSyncClick() {
@@ -575,34 +646,27 @@ async function startQrScanner() {
       if (html5QrScanner) {
         try { await html5QrScanner.stop(); } catch(_) {}
       }
-      // Initialize with hardware acceleration and QR_CODE format only
+      // Initialize with ZXing engine (useBarCodeDetectorIfSupported: false is required in Android WebView
+      // because Chromium BarcodeDetector lacks Play Services detector library and returns empty results)
       html5QrScanner = new Html5Qrcode("qr-reader", {
         formatsToSupport: [0 /* Html5QrcodeSupportedFormats.QR_CODE */],
         experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true
+          useBarCodeDetectorIfSupported: false
         },
         verbose: false
       });
 
-      // Request high-resolution back camera for dense QR scanning
       const cameraConfig = {
         facingMode: "environment"
       };
 
       const scanConfig = { 
-        fps: 10,
+        fps: 15,
         qrbox: (viewfinderWidth, viewfinderHeight) => {
-          // Dynamic square maximizing scan area without cropping out dense codes
-          const edge = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.95);
-          return { width: Math.max(edge, 240), height: Math.max(edge, 240) };
+          const edge = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.85);
+          return { width: Math.max(edge, 200), height: Math.max(edge, 200) };
         },
-        aspectRatio: 1.0,
-        disableFlip: false,
-        videoConstraints: {
-          facingMode: "environment",
-          width: { min: 640, ideal: 1280, max: 1920 },
-          height: { min: 480, ideal: 720, max: 1080 }
-        }
+        disableFlip: false
       };
 
       await html5QrScanner.start(
@@ -614,7 +678,7 @@ async function startQrScanner() {
           applyPairingPayload(decodedText);
         },
         (errorMessage) => {
-          // Normal frame scan attempt, ignore
+          // Normal frame scan attempt
         }
       );
     } else {
@@ -649,6 +713,39 @@ async function stopQrScanner() {
       html5QrScanner.clear();
     } catch (_) {}
     html5QrScanner = null;
+  }
+}
+
+async function scanQrFromFile(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  let localScanner = null;
+  try {
+    showToast('Scanning QR image...', 'info');
+    let scanner = html5QrScanner;
+    if (!scanner) {
+      localScanner = new Html5Qrcode("qr-reader", {
+        formatsToSupport: [0],
+        experimentalFeatures: { useBarCodeDetectorIfSupported: false },
+        verbose: false
+      });
+      scanner = localScanner;
+    }
+    const decodedText = await scanner.scanFile(file, true);
+    if (decodedText) {
+      await stopQrScanner();
+      await applyPairingPayload(decodedText);
+    }
+  } catch (err) {
+    console.error('[QR] File scan error:', err);
+    showToast('No QR code detected in image. Please try another photo or scan with camera.', 'error');
+  } finally {
+    if (localScanner) {
+      try { localScanner.clear(); } catch (_) {}
+    }
+    if (e.target) {
+      e.target.value = '';
+    }
   }
 }
 
@@ -814,7 +911,7 @@ function setSyncStatus(statusText, color = 'emerald') {
 
 async function updatePendingCountUI() {
   let pendingCount = 0;
-  const stores = ['subjects', 'chapters', 'lectures', 'tests', 'weekly_targets', 'study_sessions', 'revisions'];
+  const stores = ['subjects', 'chapters', 'lectures', 'tests', 'weekly_targets', 'study_sessions', 'revisions', 'weekly_target_completions'];
   for (const store of stores) {
     const pending = await dbGetPending(store);
     pendingCount += pending.length;
@@ -861,7 +958,7 @@ async function syncNow() {
     let pulledCount = 0;
 
     const lastSyncTime = await getSetting('cloud_last_sync_time', '');
-    const stores = ['subjects', 'chapters', 'lectures', 'tests', 'weekly_targets', 'study_sessions', 'revisions'];
+    const stores = ['subjects', 'chapters', 'lectures', 'tests', 'weekly_targets', 'study_sessions', 'revisions', 'weekly_target_completions'];
 
     // 1. PUSH LOCAL PENDING CHANGES
     try {
@@ -918,15 +1015,187 @@ async function syncNow() {
   }
 }
 
+let pomodoroSyncInProgress = false;
+
+async function syncPomodoroNow() {
+  if (pomodoroSyncInProgress) return;
+  if (!supabaseClient || !currentUser) {
+    showToast('Please link your account in Settings first.', 'warning');
+    return;
+  }
+
+  const pomoSyncBtn = document.getElementById('pomo-sync-now-btn');
+  const originalText = pomoSyncBtn ? pomoSyncBtn.innerHTML : '';
+  if (pomoSyncBtn) {
+    pomoSyncBtn.disabled = true;
+    pomoSyncBtn.innerHTML = '<span class="inline-block animate-spin mr-1">↻</span> Syncing...';
+  }
+
+  pomodoroSyncInProgress = true;
+  showToast('Syncing Pomodoro sessions...', 'info');
+
+  try {
+    const userId = currentUser.id;
+    const nowIso = new Date().toISOString();
+    let pushedCount = 0;
+    let pulledCount = 0;
+
+    // 1. PUSH local pending pomodoro_sessions
+    const pendingItems = await dbGetPending('pomodoro_sessions');
+    if (pendingItems.length > 0) {
+      const payload = pendingItems.map(item => {
+        const clean = { ...item, user_id: userId, updated_at: nowIso };
+        delete clean.sync_status;
+        clean.duration_minutes = Number(clean.duration_minutes) || 0;
+        clean.duration_hours = Number(clean.duration_hours) || (Math.round((clean.duration_minutes / 60) * 100) / 100);
+        clean.focus_count = Number(clean.focus_count) || 0;
+        return clean;
+      });
+
+      for (let i = 0; i < payload.length; i += 50) {
+        const chunk = payload.slice(i, i + 50);
+        const { error } = await supabaseClient
+          .from('pomodoro_sessions')
+          .upsert(chunk, { onConflict: 'user_id,client_id' });
+        if (error) {
+          console.error('[PomodoroSync] Push error:', error);
+          throw error;
+        }
+      }
+
+      pendingItems.forEach(it => it.sync_status = 'synced');
+      await dbPutBatch('pomodoro_sessions', pendingItems);
+      pushedCount = pendingItems.length;
+    }
+
+    // 2. PULL from dedicated Supabase pomodoro_sessions table
+    const { data: cloudRows, error: pullErr } = await supabaseClient
+      .from('pomodoro_sessions')
+      .select('*')
+      .eq('user_id', userId);
+
+    if (pullErr) {
+      console.error('[PomodoroSync] Pull error:', pullErr);
+      throw pullErr;
+    }
+
+    if (cloudRows && cloudRows.length > 0) {
+      const localRows = await dbGetAll('pomodoro_sessions');
+      const localMap = new Map();
+      localRows.forEach(r => localMap.set(r.client_id, r));
+
+      const toSave = [];
+      for (const cloudItem of cloudRows) {
+        cloudItem.duration_minutes = Number(cloudItem.duration_minutes) || 0;
+        cloudItem.duration_hours = Number(cloudItem.duration_hours) || (Math.round((cloudItem.duration_minutes / 60) * 100) / 100);
+        cloudItem.focus_count = Number(cloudItem.focus_count) || 0;
+
+        const existing = localMap.get(cloudItem.client_id);
+        if (!existing) {
+          cloudItem.sync_status = 'synced';
+          toSave.push(cloudItem);
+          pulledCount++;
+        } else {
+          // If local has pending deletion, protect it against overwrite
+          if (existing.sync_status === 'pending' && existing.deleted_at) {
+            continue;
+          }
+          if (cloudItem.deleted_at) {
+            existing.deleted_at = cloudItem.deleted_at;
+            existing.sync_status = 'synced';
+            toSave.push(existing);
+            pulledCount++;
+            continue;
+          }
+          if (existing.sync_status === 'pending' && (Number(existing.duration_minutes) || 0) >= cloudItem.duration_minutes) {
+            continue;
+          }
+          const merged = { ...existing, ...cloudItem, sync_status: 'synced' };
+          toSave.push(merged);
+          pulledCount++;
+        }
+      }
+
+      if (toSave.length > 0) {
+        await dbPutBatch('pomodoro_sessions', toSave);
+      }
+    }
+
+    const nowLocalTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    await setSetting('pomo_cloud_last_sync_time', nowIso);
+
+    const timeElem = document.getElementById('pomo-sync-last-time');
+    if (timeElem) timeElem.textContent = nowLocalTime;
+
+    if (pushedCount > 0 || pulledCount > 0) {
+      showToast(`Pomodoro Synced! ↑${pushedCount} ↓${pulledCount}`, 'success');
+    } else {
+      showToast('Pomodoro sessions are up to date', 'success');
+    }
+
+    refreshCurrentView();
+  } catch (err) {
+    const errMsg = err.message || String(err);
+    console.error('[PomodoroSync] Error:', errMsg);
+    showToast(`Pomodoro sync failed: ${errMsg.slice(0, 45)}`, 'error');
+  } finally {
+    pomodoroSyncInProgress = false;
+    if (pomoSyncBtn) {
+      pomoSyncBtn.disabled = false;
+      pomoSyncBtn.innerHTML = originalText || 'Sync Pomodoro';
+    }
+  }
+}
+
 async function pushStoreChanges(storeName, userId) {
   const pendingItems = await dbGetPending(storeName);
   if (pendingItems.length === 0) return 0;
 
+  if (storeName === 'weekly_target_completions') {
+    try {
+      const { data: profData, error: profErr } = await supabaseClient.from('profiles').select('settings').eq('id', userId);
+      let profSettings = (profData && profData[0] && profData[0].settings) || {};
+      let existingWtc = profSettings.weekly_target_completions || [];
+      let wtcMap = new Map();
+      existingWtc.forEach(item => wtcMap.set(item.client_id, item));
+      const nowIso = new Date().toISOString();
+      pendingItems.forEach(r => {
+        wtcMap.set(r.client_id, {
+          client_id: r.client_id,
+          week_start: r.week_start,
+          lecture_client_id: r.lecture_client_id,
+          subject_client_id: r.subject_client_id,
+          completed_at: r.completed_at,
+          updated_at: nowIso,
+          deleted_at: r.deleted_at || null
+        });
+      });
+      profSettings.weekly_target_completions = Array.from(wtcMap.values());
+      const { error: upErr } = await supabaseClient.from('profiles').upsert({ id: userId, settings: profSettings });
+      if (upErr) throw upErr;
+      for (const item of pendingItems) {
+        item.sync_status = 'synced';
+        await dbPut('weekly_target_completions', item);
+      }
+      return pendingItems.length;
+    } catch (e) {
+      console.warn('[Sync] Push weekly_target_completions warning:', e);
+      return 0;
+    }
+  }
+
   console.log(`[Sync] Pushing ${pendingItems.length} pending items for ${storeName}`);
   const nowIso = new Date().toISOString();
 
+  let itemsToPush = pendingItems;
+  if (storeName === 'study_sessions') {
+    // STRICT ISOLATION: Never push Pomodoro records to study_sessions table
+    itemsToPush = pendingItems.filter(item => item.source !== 'Pomodoro' && !item.client_id?.startsWith('pomo_'));
+    if (itemsToPush.length === 0) return 0;
+  }
+
   // Format payload for Supabase
-  const payload = pendingItems.map(item => {
+  const payload = itemsToPush.map(item => {
     const cleanItem = { ...item, user_id: userId };
     delete cleanItem.sync_status;
     cleanItem.updated_at = nowIso;
@@ -961,13 +1230,44 @@ async function pushStoreChanges(storeName, userId) {
   }
 
   // Mark local items as synced ONLY after successful cloud confirmation
-  pendingItems.forEach(item => item.sync_status = 'synced');
-  await dbPutBatch(storeName, pendingItems);
+  itemsToPush.forEach(item => item.sync_status = 'synced');
+  await dbPutBatch(storeName, itemsToPush);
 
-  return pendingItems.length;
+  return itemsToPush.length;
 }
 
 async function pullStoreChanges(storeName, userId, lastSyncTime) {
+  if (storeName === 'weekly_target_completions') {
+    try {
+      const { data: profData, error: profErr } = await supabaseClient.from('profiles').select('settings').eq('id', userId);
+      if (profErr || !profData || profData.length === 0) return 0;
+      const profSettings = profData[0].settings || {};
+      const cloudWtc = profSettings.weekly_target_completions || [];
+      if (!Array.isArray(cloudWtc) || cloudWtc.length === 0) return 0;
+      
+      const localItems = await dbGetAll('weekly_target_completions');
+      const localMap = new Map();
+      localItems.forEach(it => localMap.set(it.client_id, it));
+      
+      let pulled = 0;
+      for (const cloudItem of cloudWtc) {
+        const local = localMap.get(cloudItem.client_id);
+        if (!local) {
+          cloudItem.sync_status = 'synced';
+          await dbPut('weekly_target_completions', cloudItem);
+          pulled++;
+        } else if (local.sync_status !== 'pending') {
+          cloudItem.sync_status = 'synced';
+          await dbPut('weekly_target_completions', cloudItem);
+          pulled++;
+        }
+      }
+      return pulled;
+    } catch (e) {
+      console.warn('[Sync] Pull weekly_target_completions warning:', e);
+      return 0;
+    }
+  }
   let allCloudRows = [];
   let from = 0;
   const pageSize = 1000;
@@ -996,6 +1296,11 @@ async function pullStoreChanges(storeName, userId, lastSyncTime) {
     allCloudRows = allCloudRows.concat(data);
     if (data.length < pageSize) break;
     from += pageSize;
+  }
+
+  if (storeName === 'study_sessions') {
+    // STRICT ISOLATION: Exclude any legacy Pomodoro rows from cloud study_sessions
+    allCloudRows = allCloudRows.filter(r => r.source !== 'Pomodoro' && !r.client_id?.startsWith('pomo_'));
   }
 
   if (allCloudRows.length === 0) return 0;
@@ -1102,11 +1407,12 @@ function triggerDebouncedAutoSync() {
 // ============================================================================
 
 async function calculateStudyAnalytics(timeFilter = 'all_time') {
-  const sessions = await dbGetAll('study_sessions');
-  // Pomodoro sessions only (strictly source === 'Pomodoro')
-  const activeSessions = sessions.filter(s => 
-    !s.deleted_at && s.source === 'Pomodoro'
-  );
+  let sessions = await dbGetAll('pomodoro_sessions');
+  if (!sessions || sessions.length === 0) {
+    const legacySessions = await dbGetAll('study_sessions');
+    sessions = legacySessions.filter(s => s.source === 'Pomodoro' || s.client_id?.startsWith('pomo_'));
+  }
+  const activeSessions = sessions.filter(s => !s.deleted_at);
 
   const todayStr = getTodayDateStr();
   const { weekStart, weekEnd } = getWeekDateRange(todayStr);
@@ -1613,6 +1919,7 @@ async function renderDashboard() {
   const chapters = await dbGetAll('chapters');
   const tests = await dbGetAll('tests');
   const weeklyTargets = await dbGetAll('weekly_targets');
+  const targetCompletions = await dbGetAll('weekly_target_completions');
   const studySessions = await dbGetAll('study_sessions');
   const studyData = await calculateStudyAnalytics('all_time');
 
@@ -1768,10 +2075,10 @@ async function renderDashboard() {
         });
         achievedVal = Math.round(pMins / 60);
       } else {
-        achievedVal = activeLectures.filter(l => 
-          l.subject_client_id === sub.client_id && 
-          l.is_completed && 
-          (l.completed_at ? (l.completed_at >= weekStart && l.completed_at <= weekEnd + 'T23:59:59') : (l.scheduled_date >= weekStart && l.scheduled_date <= weekEnd))
+        achievedVal = targetCompletions.filter(c => 
+          !c.deleted_at && 
+          c.week_start === weekStart && 
+          c.subject_client_id === sub.client_id
         ).length;
       }
 
@@ -1793,6 +2100,57 @@ async function renderDashboard() {
         </div>
       `;
     }).join('');
+
+    // Render individual Target Lectures for this week with dual status
+    const thisWeekLecs = activeLectures.filter(l => 
+      (l.scheduled_date >= weekStart && l.scheduled_date <= weekEnd) ||
+      (l.rescheduled_date >= weekStart && l.rescheduled_date <= weekEnd)
+    );
+    const targetCompLecIds = new Set(targetCompletions.filter(c => !c.deleted_at && c.week_start === weekStart).map(c => c.lecture_client_id));
+    const targetLecsContainer = document.getElementById('dash-target-lectures-list');
+    const targetLecsCounter = document.getElementById('dash-target-lecs-counter');
+    if (targetLecsContainer) {
+      const doneCount = thisWeekLecs.filter(l => targetCompLecIds.has(l.client_id)).length;
+      if (targetLecsCounter) {
+        targetLecsCounter.textContent = `${doneCount} / ${thisWeekLecs.length} Done`;
+      }
+      if (thisWeekLecs.length === 0) {
+        targetLecsContainer.innerHTML = '<div class="py-4 text-center text-slate-400 text-xs">No target lectures scheduled for this week.</div>';
+      } else {
+        targetLecsContainer.innerHTML = thisWeekLecs.map(l => {
+          const isSylDone = Boolean(l.is_completed);
+          const isTgtDone = targetCompLecIds.has(l.client_id);
+          const sub = subjects.find(s => s.client_id === l.subject_client_id);
+          return `
+            <div class="p-2.5 rounded-xl border ${isTgtDone ? 'bg-emerald-50/50 border-emerald-200' : (isSylDone ? 'bg-blue-50/40 border-blue-200' : 'bg-slate-50 border-slate-200')} flex items-center justify-between gap-2 text-xs">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5 text-[10px] mb-0.5">
+                  <span class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: ${sub ? (sub.color || '#3b82f6') : '#3b82f6'};"></span>
+                  <span class="font-bold text-slate-800">${sub ? (sub.display_name || sub.name) : ''}</span>
+                  <span class="text-slate-400">•</span>
+                  <span class="text-slate-500 font-mono text-[10px]">${l.scheduled_date || ''}</span>
+                </div>
+                <div class="font-bold text-slate-800 truncate ${isTgtDone ? 'line-through text-slate-400' : ''}">
+                  Lec #${l.lecture_no}: ${l.topic || l.lecture_name || ''}
+                </div>
+              </div>
+              <div class="flex items-center gap-1.5 flex-shrink-0">
+                <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${isSylDone ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">
+                  ${isSylDone ? '✓ Syl' : '⏳ Syl'}
+                </span>
+                <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${isTgtDone ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                  ${isTgtDone ? '✓ Tgt' : '⏳ Tgt'}
+                </span>
+                <button type="button" onclick="toggleTargetLecture('${l.client_id}', '${weekStart}')" class="px-2 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer ${isTgtDone ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}">
+                  <i data-lucide="${isTgtDone ? 'check' : 'target'}" class="w-3 h-3"></i>
+                  ${isTgtDone ? 'Done' : 'Target'}
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
   }
 
   const remainingWeeklyUnits = Math.max(0, totalWeeklyTargetUnits - totalWeeklyAchievedUnits);
@@ -1914,6 +2272,57 @@ async function renderDashboard() {
         </div>
       `;
     }).join('');
+  }
+
+  // Recent Study Activity Ledger
+  const recentActivities = await getRecentStudyActivity(15);
+  const recentList = document.getElementById('dash-recent-study-list');
+  const recentCount = document.getElementById('dash-recent-study-count');
+  if (recentCount) recentCount.textContent = `${recentActivities.length} Records`;
+  if (recentList) {
+    if (recentActivities.length === 0) {
+      recentList.innerHTML = '<div class="py-6 text-center text-slate-400 text-xs">No learning activity recorded yet. Complete lectures, DPPs, revisions, or tests to populate this ledger.</div>';
+    } else {
+      recentList.innerHTML = recentActivities.map(act => {
+        let badgeBg = 'bg-blue-50 text-blue-700 border-blue-200';
+        let iconColor = 'text-blue-600';
+        if (act.type === 'target_lecture') {
+          badgeBg = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+          iconColor = 'text-emerald-600';
+        } else if (act.type === 'dpp') {
+          badgeBg = 'bg-amber-50 text-amber-800 border-amber-200';
+          iconColor = 'text-amber-600';
+        } else if (act.type === 'revision') {
+          badgeBg = 'bg-purple-50 text-purple-800 border-purple-200';
+          iconColor = 'text-purple-600';
+        } else if (act.type === 'test') {
+          badgeBg = 'bg-rose-50 text-rose-800 border-rose-200';
+          iconColor = 'text-rose-600';
+        }
+
+        return `
+          <div class="p-2.5 rounded-xl border border-slate-100 bg-slate-50/70 flex items-center justify-between gap-2.5 text-xs">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="w-7 h-7 rounded-lg bg-white border border-slate-200 shadow-xs flex items-center justify-center flex-shrink-0">
+                <i data-lucide="${act.icon || 'book-open'}" class="w-3.5 h-3.5 ${iconColor}"></i>
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5 mb-0.5">
+                  <span class="font-bold text-slate-900 truncate">${act.title}</span>
+                  <span class="text-[9px] px-1.5 py-0.2 rounded-full border font-bold ${badgeBg} flex-shrink-0">
+                    ${act.type_label}
+                  </span>
+                </div>
+                <div class="text-[10px] text-slate-500 truncate">${act.subtitle}</div>
+              </div>
+            </div>
+            <div class="text-right flex-shrink-0 text-[10px] text-slate-400 font-medium">
+              ${formatActivityTime(act.timestamp)}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
   }
 
   if (window.lucide) lucide.createIcons();
@@ -2544,8 +2953,187 @@ async function toggleLectureCompletion(clientId) {
   lecture.sync_status = 'pending';
 
   await dbPut('lectures', lecture);
+
+  // If uncompleting lecture in syllabus, soft-delete weekly target completions for this lecture
+  if (!lecture.is_completed) {
+    const allWtc = await dbGetAll('weekly_target_completions');
+    const forThisLec = allWtc.filter(w => w.lecture_client_id === clientId && !w.deleted_at);
+    for (const wtc of forThisLec) {
+      wtc.deleted_at = nowIso;
+      wtc.updated_at = nowIso;
+      wtc.sync_status = 'pending';
+      await dbPut('weekly_target_completions', wtc);
+    }
+  }
+
   triggerDebouncedAutoSync();
   refreshCurrentView();
+}
+
+async function completeTargetLecture(lectureClientId, weekStart) {
+  if (!lectureClientId) return;
+  if (!weekStart) {
+    const { weekStart: ws } = getWeekDateRange(getTodayDateStr());
+    weekStart = ws;
+  }
+  const nowIso = new Date().toISOString();
+  
+  const allWtc = await dbGetAll('weekly_target_completions');
+  let existing = allWtc.find(w => w.week_start === weekStart && w.lecture_client_id === lectureClientId);
+  
+  const lecture = await dbGet('lectures', lectureClientId);
+  const subjectClientId = lecture ? lecture.subject_client_id : '';
+  
+  if (existing) {
+    existing.deleted_at = null;
+    existing.completed_at = nowIso;
+    existing.updated_at = nowIso;
+    existing.sync_status = 'pending';
+    await dbPut('weekly_target_completions', existing);
+  } else {
+    const newWtc = {
+      client_id: 'wtc_' + generateUUID(),
+      week_start: weekStart,
+      lecture_client_id: lectureClientId,
+      subject_client_id: subjectClientId,
+      completed_at: nowIso,
+      updated_at: nowIso,
+      sync_status: 'pending',
+      deleted_at: null
+    };
+    await dbPut('weekly_target_completions', newWtc);
+  }
+
+  // Also ensure lecture is marked completed in syllabus
+  if (lecture) {
+    lecture.is_completed = true;
+    if (!lecture.completed_at) lecture.completed_at = nowIso;
+    lecture.updated_at = nowIso;
+    lecture.sync_status = 'pending';
+    await dbPut('lectures', lecture);
+  }
+
+  triggerDebouncedAutoSync();
+  refreshCurrentView();
+  showToast('Marked as Weekly Target completed!', 'success');
+}
+
+async function uncompleteTargetLecture(lectureClientId, weekStart) {
+  if (!lectureClientId) return;
+  if (!weekStart) {
+    const { weekStart: ws } = getWeekDateRange(getTodayDateStr());
+    weekStart = ws;
+  }
+  const nowIso = new Date().toISOString();
+  const allWtc = await dbGetAll('weekly_target_completions');
+  const existing = allWtc.find(w => w.week_start === weekStart && w.lecture_client_id === lectureClientId && !w.deleted_at);
+  if (existing) {
+    existing.deleted_at = nowIso;
+    existing.updated_at = nowIso;
+    existing.sync_status = 'pending';
+    await dbPut('weekly_target_completions', existing);
+    triggerDebouncedAutoSync();
+    refreshCurrentView();
+    showToast('Weekly Target completion removed', 'info');
+  }
+}
+
+async function toggleTargetLecture(lectureClientId, weekStart) {
+  if (!weekStart) {
+    const { weekStart: ws } = getWeekDateRange(getTodayDateStr());
+    weekStart = ws;
+  }
+  const allWtc = await dbGetAll('weekly_target_completions');
+  const existing = allWtc.find(w => w.week_start === weekStart && w.lecture_client_id === lectureClientId && !w.deleted_at);
+  if (existing) {
+    await uncompleteTargetLecture(lectureClientId, weekStart);
+  } else {
+    await completeTargetLecture(lectureClientId, weekStart);
+  }
+}
+
+async function getRecentStudyActivity(limit = 20) {
+  const lectures = await dbGetAll('lectures');
+  const targetCompletions = await dbGetAll('weekly_target_completions');
+  const tests = await dbGetAll('tests');
+  const revisions = await dbGetAll('revisions');
+  const subjects = await dbGetAll('subjects');
+  const chapters = await dbGetAll('chapters');
+
+  const subjMap = new Map();
+  subjects.forEach(s => subjMap.set(s.client_id, s));
+  const chMap = new Map();
+  chapters.forEach(c => chMap.set(c.client_id, c));
+  const targetCompletedLecIds = new Set(targetCompletions.filter(t => !t.deleted_at).map(t => t.lecture_client_id));
+
+  const items = [];
+
+  // Completed lectures
+  for (const l of lectures) {
+    if (l.deleted_at || !l.is_completed || !l.completed_at) continue;
+    const isTarget = targetCompletedLecIds.has(l.client_id);
+    const sub = subjMap.get(l.subject_client_id);
+    const ch = chMap.get(l.chapter_client_id);
+    items.push({
+      id: `lec_${l.client_id}`,
+      type: isTarget ? 'target_lecture' : 'lecture',
+      type_label: isTarget ? 'Target Lecture Completed' : 'Lecture Completed',
+      title: `Lec ${l.lecture_no}: ${l.topic || l.lecture_name || ''}`,
+      subtitle: `${sub ? (sub.display_name || sub.name) : ''} • ${ch ? ch.name : ''}`,
+      timestamp: l.completed_at,
+      icon: isTarget ? 'target' : 'book-open',
+      badge_color: isTarget ? 'emerald' : 'blue'
+    });
+
+    if (l.is_dpp_completed && l.dpp_completed_at) {
+      items.push({
+        id: `dpp_${l.client_id}`,
+        type: 'dpp',
+        type_label: 'DPP Solved',
+        title: `DPP #${l.dpp_no || l.lecture_no}: ${sub ? (sub.display_name || sub.name) : ''}`,
+        subtitle: `${ch ? ch.name : ''}`,
+        timestamp: l.dpp_completed_at,
+        icon: 'check-square',
+        badge_color: 'amber'
+      });
+    }
+  }
+
+  // Completed tests
+  for (const t of tests) {
+    if (t.deleted_at || t.status !== 'completed') continue;
+    const testTs = t.updated_at || (t.test_date ? `${t.test_date}T20:00:00` : null);
+    if (!testTs) continue;
+    items.push({
+      id: `test_${t.client_id}`,
+      type: 'test',
+      type_label: 'JEE Test Completed',
+      title: t.test_name || 'JEE Exam',
+      subtitle: t.score !== null ? `Score: ${t.score} / ${t.total_marks || 300}` : (t.test_type || 'Full Test'),
+      timestamp: testTs,
+      icon: 'award',
+      badge_color: 'rose'
+    });
+  }
+
+  // Completed revisions
+  for (const r of revisions) {
+    if (r.deleted_at || !r.is_completed || !r.completed_at) continue;
+    items.push({
+      id: `rev_${r.client_id}`,
+      type: 'revision',
+      type_label: `Revision ${r.stage_no || 1} Completed`,
+      title: `Revision: Stage ${r.stage_no || 1}`,
+      subtitle: r.notes || 'Lecture Revision',
+      timestamp: r.completed_at,
+      icon: 'rotate-cw',
+      badge_color: 'purple'
+    });
+  }
+
+  // Sort descending by timestamp
+  items.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  return items.slice(0, limit);
 }
 
 async function toggleDppCompletion(clientId) {
@@ -2890,15 +3478,15 @@ async function renderAnalyticsView() {
   if (targetsSummary) {
     const todayStr = getTodayDateStr();
     const { weekStart, weekEnd } = getWeekDateRange(todayStr);
+    const targetCompletions = await dbGetAll('weekly_target_completions');
 
-    targetsSummary.innerHTML = subjects.map(sub => {
+    const subjectCardsHtml = subjects.map(sub => {
       const custom = weeklyTargets.find(wt => wt.week_start === weekStart && wt.subject_client_id === sub.client_id);
       const targetVal = custom ? custom.target_value : sub.weekly_target_val;
       let achieved = 0;
       if (sub.target_type === 'lectures') {
-        achieved = activeLectures.filter(l => 
-          l.subject_client_id === sub.client_id && l.is_completed && 
-          ((l.completed_at && l.completed_at >= weekStart && l.completed_at <= weekEnd + 'T23:59:59') || (l.scheduled_date >= weekStart && l.scheduled_date <= weekEnd))
+        achieved = targetCompletions.filter(c => 
+          !c.deleted_at && c.week_start === weekStart && c.subject_client_id === sub.client_id
         ).length;
       } else {
         const pSessions = (studySessions || []).filter(s => 
@@ -2925,6 +3513,66 @@ async function renderAnalyticsView() {
         </div>
       `;
     }).join('');
+
+    // Target lectures breakdown
+    const thisWeekLecs = activeLectures.filter(l => 
+      (l.scheduled_date >= weekStart && l.scheduled_date <= weekEnd) ||
+      (l.rescheduled_date >= weekStart && l.rescheduled_date <= weekEnd)
+    );
+    const targetCompLecIds = new Set(targetCompletions.filter(c => !c.deleted_at && c.week_start === weekStart).map(c => c.lecture_client_id));
+    const doneCount = thisWeekLecs.filter(l => targetCompLecIds.has(l.client_id)).length;
+
+    const lecturesHtml = `
+      <div class="mt-4 pt-3 border-t border-slate-200">
+        <div class="flex items-center justify-between mb-2">
+          <div class="font-black text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="list-checks" class="w-3.5 h-3.5 text-emerald-600"></i>
+            <span>Target Lectures This Week</span>
+          </div>
+          <span class="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+            ${doneCount} / ${thisWeekLecs.length} Done
+          </span>
+        </div>
+        <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
+          ${thisWeekLecs.length === 0 ? '<div class="py-4 text-center text-slate-400 text-xs">No scheduled target lectures found for this week.</div>' : 
+            thisWeekLecs.map(l => {
+              const isSylDone = Boolean(l.is_completed);
+              const isTgtDone = targetCompLecIds.has(l.client_id);
+              const sub = subjects.find(s => s.client_id === l.subject_client_id);
+              return `
+                <div class="p-2.5 rounded-xl border ${isTgtDone ? 'bg-emerald-50/50 border-emerald-200' : (isSylDone ? 'bg-blue-50/40 border-blue-200' : 'bg-slate-50 border-slate-200')} flex items-center justify-between gap-2 text-xs">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-1.5 text-[10px] mb-0.5">
+                      <span class="w-2 h-2 rounded-full" style="background-color: ${sub ? (sub.color || '#3b82f6') : '#3b82f6'};"></span>
+                      <span class="font-bold text-slate-800">${sub ? (sub.display_name || sub.name) : ''}</span>
+                      <span class="text-slate-400">•</span>
+                      <span class="text-slate-500 font-mono">${l.scheduled_date || ''}</span>
+                    </div>
+                    <div class="font-bold text-slate-800 truncate ${isTgtDone ? 'line-through text-slate-400' : ''}">
+                      Lec #${l.lecture_no}: ${l.topic || l.lecture_name || ''}
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-1.5 flex-shrink-0">
+                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${isSylDone ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">
+                      ${isSylDone ? '✓ Syl' : '⏳ Syl'}
+                    </span>
+                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${isTgtDone ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                      ${isTgtDone ? '✓ Tgt' : '⏳ Tgt'}
+                    </span>
+                    <button type="button" onclick="toggleTargetLecture('${l.client_id}', '${weekStart}')" class="px-2 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer ${isTgtDone ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}">
+                      <i data-lucide="${isTgtDone ? 'check' : 'target'}" class="w-3 h-3"></i>
+                      ${isTgtDone ? 'Done' : 'Target'}
+                    </button>
+                  </div>
+                </div>
+              `;
+            }).join('')
+          }
+        </div>
+      </div>
+    `;
+
+    targetsSummary.innerHTML = subjectCardsHtml + lecturesHtml;
   }
 
   await updatePendingCountUI();
@@ -3137,10 +3785,12 @@ async function handleLogStudySubmit(e) {
     updated_at: nowIso
   };
 
-  await dbPut('study_sessions', newSession);
+  await dbPut('pomodoro_sessions', newSession);
   showToast(`Logged ${formatMinutesStr(durationMins)} focus session!`, 'success');
   closeAllSheets();
-  triggerDebouncedAutoSync();
+  if (navigator.onLine && currentUser) {
+    syncPomodoroNow().catch(err => console.warn(err));
+  }
   refreshCurrentView();
 }
 
@@ -3148,7 +3798,10 @@ let sessionToDeleteClientId = null;
 
 async function confirmDeleteStudySession(clientId) {
   if (!clientId) return;
-  const session = await dbGet('study_sessions', clientId);
+  let session = await dbGet('pomodoro_sessions', clientId);
+  if (!session) {
+    session = await dbGet('study_sessions', clientId);
+  }
   if (!session) {
     showToast('Session not found', 'error');
     return;
@@ -3181,7 +3834,12 @@ async function executeDeleteStudySession() {
   closeDeleteSessionModal();
 
   try {
-    const session = await dbGet('study_sessions', clientId);
+    let session = await dbGet('pomodoro_sessions', clientId);
+    let isPomoStore = true;
+    if (!session) {
+      session = await dbGet('study_sessions', clientId);
+      isPomoStore = false;
+    }
     if (!session) {
       showToast('Session not found', 'error');
       return;
@@ -3191,19 +3849,21 @@ async function executeDeleteStudySession() {
     session.deleted_at = nowIso;
     session.sync_status = 'pending';
     session.updated_at = nowIso;
-    await dbPut('study_sessions', session);
-
-    showToast('Pomodoro session deleted', 'info');
+    if (isPomoStore) {
+      await dbPut('pomodoro_sessions', session);
+      showToast('Pomodoro session deleted', 'info');
+      if (navigator.onLine && currentUser) {
+        syncPomodoroNow().catch(err => console.warn(err));
+      }
+    } else {
+      await dbPut('study_sessions', session);
+      showToast('Study session deleted', 'info');
+      triggerDebouncedAutoSync();
+    }
 
     // Immediately update UI datasets
     await renderDashboard();
     await renderStudyAnalyticsView();
-
-    // Trigger cloud sync
-    triggerDebouncedAutoSync();
-    if (navigator.onLine && isCloudSyncConfigured()) {
-      syncNow().catch(err => console.warn('[Sync] Immediate sync after delete failed:', err));
-    }
   } catch (err) {
     console.error('Error deleting study session:', err);
     showToast('Failed to delete session', 'error');
